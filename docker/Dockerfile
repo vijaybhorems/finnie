@@ -18,6 +18,10 @@ COPY . .
 # Build RAG index at startup via entrypoint
 # (index is stored in a Docker volume for persistence)
 
+# Suppress noisy transformers lazy-import warnings (torchvision not needed)
+ENV TRANSFORMERS_VERBOSITY=error
+ENV TOKENIZERS_PARALLELISM=false
+
 EXPOSE 8501
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

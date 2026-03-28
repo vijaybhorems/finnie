@@ -1,0 +1,78 @@
+Retirement Accounts: 401(k), IRA, Roth, and More
+
+Tax-advantaged retirement accounts are among the most powerful wealth-building tools available to U.S. investors. Understanding the different types and their rules is essential for maximizing after-tax wealth.
+
+401(k) PLANS
+
+What It Is:
+An employer-sponsored retirement savings plan. Contributions come from pre-tax dollars, reducing current taxable income. Investments grow tax-deferred until withdrawal.
+
+2024 Contribution Limits:
+- Employee contribution: $23,000/year (under age 50)
+- Catch-up contribution (age 50+): Additional $7,500/year (total $30,500)
+- Total including employer contributions: $69,000/year
+
+Key Features:
+- Employer Match: Many employers match 50-100% of employee contributions up to a percentage of salary. This is free money — always contribute at least enough to get the full match.
+- Vesting: Employer contributions may vest over time (e.g., 20% per year over 5 years)
+- Investment Options: Limited to fund menu offered by plan provider
+- Early Withdrawal: 10% penalty plus ordinary income tax before age 59½
+- Required Minimum Distributions (RMDs): Must begin by age 73
+
+Roth 401(k):
+After-tax contributions; tax-free growth and withdrawals. Available at many employers. Same contribution limits as traditional 401(k). No RMDs during owner's lifetime (starting 2024).
+
+INDIVIDUAL RETIREMENT ACCOUNTS (IRAs)
+
+Traditional IRA:
+Pre-tax contributions (if income-eligible); tax-deferred growth; taxed at withdrawal.
+2024 limit: $7,000/year ($8,000 if age 50+)
+Deductibility phases out for high incomes if covered by a workplace plan.
+
+Roth IRA:
+After-tax contributions; tax-free growth; tax-free qualified withdrawals.
+2024 income limits: Phase-out begins at $146,000 (single) / $230,000 (married filing jointly)
+No RMDs. Contributions (not earnings) can be withdrawn at any time without penalty.
+
+Backdoor Roth IRA:
+High-income earners who exceed Roth IRA income limits can make non-deductible Traditional IRA contributions and then convert to Roth. Consult a tax professional.
+
+ROTH vs. TRADITIONAL: The Decision Framework
+
+Choose Roth When:
+- You're in a low tax bracket now (expect to be in higher bracket at retirement)
+- You're young (more time for tax-free compounding)
+- You want flexibility (no RMDs, penalty-free contribution withdrawal)
+
+Choose Traditional When:
+- You're in a high tax bracket now (want the deduction today)
+- You expect lower income in retirement
+- Your state has high income taxes now but you plan to move to a no-tax state at retirement
+
+HEALTH SAVINGS ACCOUNT (HSA)
+
+Available to those with High-Deductible Health Plans (HDHPs). Triple tax advantage:
+1. Contributions are pre-tax
+2. Growth is tax-free
+3. Withdrawals for qualified medical expenses are tax-free
+
+2024 limits: $4,150 (individual) / $8,300 (family)
+After age 65, can withdraw for any purpose (taxed as ordinary income, like a Traditional IRA).
+HSA is the most tax-efficient account available — maximize it if you can afford to pay medical expenses out of pocket.
+
+SOLO 401(k) AND SEP-IRA (FOR SELF-EMPLOYED)
+
+Solo 401(k): For self-employed with no employees. Can contribute as both employer and employee.
+2024 limit: Up to $69,000 / $76,500 (age 50+)
+
+SEP-IRA: Simpler administration; contributions up to 25% of compensation, max $69,000.
+
+OPTIMAL CONTRIBUTION ORDER (TAX EFFICIENCY)
+
+1. 401(k) contributions up to employer match (100% instant return)
+2. HSA (if eligible) — triple tax advantage
+3. Max out Roth IRA (tax-free compounding)
+4. Max out 401(k) beyond the match
+5. Taxable brokerage account
+
+This order maximizes tax efficiency while ensuring you capture all employer-provided benefits.

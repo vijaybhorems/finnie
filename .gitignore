@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+data/faiss_index/
+htmlcov/
+.pytest_cache/
+.venv/

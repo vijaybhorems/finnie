@@ -1,0 +1,51 @@
+Asset Allocation: Matching Investments to Goals
+
+Asset allocation — the division of a portfolio among different asset classes — is widely considered the most important investment decision. Studies by Brinson, Hood, and Beebower found that asset allocation explains over 90% of the variability in portfolio returns over time.
+
+Core Asset Classes:
+
+Equities (Stocks): 7-10% historical annual returns; high volatility; best for long time horizons.
+Fixed Income (Bonds): 2-5% historical annual returns; lower volatility; capital preservation.
+Cash & Equivalents: Money market funds, T-bills; minimal returns but maximum liquidity and safety.
+Real Assets: Real estate, commodities, infrastructure; inflation protection.
+Alternative Investments: Hedge funds, private equity, venture capital; typically for accredited investors.
+
+Age-Based Allocation Rules of Thumb:
+
+The "Rule of 100" (now updated to Rule of 110 or 120 given longer lifespans):
+Stock allocation ≈ 110 - Your Age
+A 30-year-old: ~80% stocks, 20% bonds
+A 60-year-old: ~50% stocks, 50% bonds
+
+Target Date Funds apply this concept automatically — a 2055 Target Date Fund starts equity-heavy and automatically shifts toward bonds as 2055 approaches.
+
+Strategic vs. Tactical Asset Allocation:
+Strategic allocation sets long-term targets based on risk tolerance and goals, with periodic rebalancing. Tactical allocation makes short-term adjustments based on market conditions — evidence for systematic outperformance is weak for most investors.
+
+Rebalancing:
+Over time, outperforming assets grow to exceed their target weights, increasing risk beyond intended levels. A portfolio targeting 60/40 stocks/bonds might drift to 70/30 after a bull market. Rebalancing restores target weights by selling outperformers and buying underperformers.
+
+Rebalancing strategies:
+- Calendar-based: Quarterly or annual review
+- Threshold-based: Rebalance when any asset class drifts more than 5% from target
+- Tax-aware: Use new contributions to rebalance in taxable accounts to avoid capital gains
+
+Risk Tolerance vs. Risk Capacity:
+Risk tolerance: Psychological comfort with portfolio fluctuations
+Risk capacity: Financial ability to absorb losses
+
+Someone may have high risk tolerance (not lose sleep over volatility) but low risk capacity (needs the money in 2 years). The lower of the two should determine allocation.
+
+Sample Allocations by Risk Profile:
+
+Conservative (5-10 year horizon, low risk):
+- 30% U.S. stocks, 10% international stocks, 50% bonds, 10% cash
+
+Moderate (10-20 year horizon, medium risk):
+- 45% U.S. stocks, 15% international stocks, 35% bonds, 5% cash
+
+Aggressive (20+ year horizon, high risk):
+- 60% U.S. stocks, 25% international stocks, 10% bonds, 5% REITs
+
+The Role of Glide Path:
+As investors approach their goal date (retirement, home purchase), they should gradually reduce equity exposure — the "glide path." This reduces the sequence-of-returns risk: a major market crash just before retirement can devastate portfolios if they're still heavily in stocks.

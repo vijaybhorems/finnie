@@ -1,0 +1,85 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────
+# Finnie — AI Finance Assistant
+# All services share a single bridge network.
+# Start with: docker compose up --build
+# ─────────────────────────────────────────────────────────
+
+services:
+
+  # ── Redis cache ────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: finnie_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finnie_net
+    restart: unless-stopped
+
+  # ── RAG indexer (one-shot job to build FAISS index) ────
+  rag_indexer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: finnie_rag_indexer
+    command: >
+      python -c "
+      from src.rag.indexer import RAGIndexer;
+      indexer = RAGIndexer();
+      indexer.build_index(force=False);
+      print('RAG index ready.')
+      "
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - ../.env
+    volumes:
+      - rag_index:/app/data/faiss_index
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - finnie_net
+
+  # ── Streamlit web application ──────────────────────────
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: finnie_app
+    ports:
+      - "8501:8501"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - ../.env
+    volumes:
+      - rag_index:/app/data/faiss_index
+    depends_on:
+      redis:
+        condition: service_healthy
+      rag_indexer:
+        condition: service_completed_successfully
+    networks:
+      - finnie_net
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  rag_index:
+
+networks:
+  finnie_net:
+    driver: bridge

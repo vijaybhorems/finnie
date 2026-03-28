@@ -1,0 +1,42 @@
+Diversification: The Only Free Lunch in Investing
+
+Nobel laureate Harry Markowitz famously called diversification "the only free lunch in investing." By combining assets that don't move in perfect lockstep, investors can reduce risk without sacrificing expected returns.
+
+The Mathematics of Diversification:
+Portfolio volatility is not simply the average of individual asset volatilities — it depends on correlations between assets. Two assets each with 20% volatility combined in a portfolio will have less than 20% portfolio volatility if their correlation is less than 1.
+
+The Risk Reduction Formula:
+Portfolio variance = w₁²σ₁² + w₂²σ₂² + 2w₁w₂σ₁σ₂ρ₁₂
+
+Where w = weights, σ = standard deviations, ρ = correlation coefficient
+When ρ < 1, portfolio variance is less than the weighted average of individual variances.
+
+Types of Diversification:
+
+1. Asset Class Diversification:
+Stocks, bonds, real estate, commodities, cash equivalents each behave differently in various economic environments. During recessions, bonds typically rise as stocks fall. Gold often holds value during crises.
+
+2. Geographic Diversification:
+U.S. stocks represent about 60% of global market cap, but the global economy is much larger. International exposure (developed and emerging markets) reduces dependence on the U.S. business cycle. Correlation between U.S. and international markets has increased but remains imperfect.
+
+3. Sector Diversification:
+The S&P 500 has 11 GICS sectors: Technology, Healthcare, Financials, Consumer Discretionary, Industrials, Communication Services, Consumer Staples, Energy, Utilities, Real Estate, Materials. Concentrating in one sector creates sector-specific risk.
+
+4. Factor Diversification:
+Modern factor investing identifies systematic risk premia: value, momentum, quality, low volatility, small-cap. Exposure to multiple uncorrelated factors provides more robust risk-adjusted returns.
+
+5. Time Diversification:
+Investing over time (rather than all at once) reduces timing risk. The concept is controversial — over long enough periods, stocks reliably outperform, but for many individual investors the behavioral benefit of spreading risk matters more.
+
+Common Diversification Mistakes:
+
+Naive Diversification: Holding many funds that own the same underlying stocks (e.g., five S&P 500 ETFs) doesn't reduce concentration.
+
+Home Country Bias: U.S. investors often hold 80-90% U.S. stocks despite the U.S. being 60% of global cap. This concentrates country-specific political and economic risk.
+
+Correlation Breakdown in Crises: During severe market stress (2008, March 2020), correlations between risky assets spike toward 1.0. Truly safe assets like U.S. Treasuries and cash provide the real buffer.
+
+Concentration in Employer Stock: Holding significant employer stock concentrates both investment and employment risk. Enron employees who held company stock in their 401(k)s lost both jobs and retirement savings simultaneously.
+
+The Efficient Frontier:
+Markowitz's Modern Portfolio Theory (MPT) shows that for any level of expected return, there is an optimal portfolio that minimizes risk (the efficient frontier). Index funds, by holding all securities, approximate the market portfolio which MPT suggests is the most efficient portfolio for most investors.

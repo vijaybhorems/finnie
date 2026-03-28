@@ -1,0 +1,49 @@
+Stocks and Bonds: The Two Pillars of Investing
+
+Understanding the fundamental characteristics of stocks and bonds is essential for constructing any investment portfolio.
+
+STOCKS (EQUITIES)
+
+What Stocks Represent:
+When you buy a share of stock, you become a partial owner of that company. If the company has 10 million shares outstanding and you own 1,000 shares, you own 0.01% of the company. This entitles you to a proportional share of profits (via dividends) and residual assets if the company is liquidated.
+
+How Stocks Generate Returns:
+1. Capital Appreciation: The stock price rises as the company grows earnings and becomes more valuable.
+2. Dividends: Companies distribute a portion of earnings to shareholders. Dividend yield = Annual Dividend / Stock Price.
+
+Key Stock Metrics:
+- P/E Ratio (Price-to-Earnings): Measures how much investors pay per dollar of earnings. A P/E of 20 means investors pay $20 for every $1 of annual earnings. Higher P/E suggests growth expectations; lower P/E may indicate value or distress.
+- EPS (Earnings Per Share): Net income divided by shares outstanding. Growing EPS generally supports stock price appreciation.
+- Market Capitalization: Stock price multiplied by shares outstanding. Classifies companies as large-cap (>$10B), mid-cap ($2B-$10B), or small-cap (<$2B).
+- Beta: Measures volatility relative to the market. Beta of 1.2 means the stock moves 20% more than the market in either direction.
+- Dividend Yield: Annual dividend per share divided by stock price. A 3% yield on a $100 stock means $3 annual dividends per share.
+
+Stock Market Indices:
+- S&P 500: 500 largest U.S. companies by market cap. Most widely used benchmark.
+- Dow Jones Industrial Average (DJIA): 30 large U.S. companies. Price-weighted; older and less representative than S&P 500.
+- NASDAQ Composite: Tech-heavy index of all companies listed on NASDAQ.
+- Russell 2000: 2,000 small-cap U.S. companies.
+
+BONDS (FIXED INCOME)
+
+What Bonds Represent:
+A bond is a loan made by an investor to a borrower (government or corporation). The borrower promises to pay periodic interest (coupon payments) and return the principal (face value) at maturity.
+
+Bond Terminology:
+- Face Value (Par): The amount the bond pays at maturity, typically $1,000.
+- Coupon Rate: Annual interest rate paid on the face value. A 5% coupon on a $1,000 bond pays $50/year.
+- Maturity: The date when the principal is repaid. Ranges from short-term (under 2 years) to long-term (30 years).
+- Yield to Maturity (YTM): Total return if held to maturity, accounting for coupon payments and any price discount/premium.
+- Credit Rating: Assessment of borrower's ability to repay. AAA is highest quality; below BBB is "junk" or high-yield.
+
+Bond Price and Interest Rate Relationship:
+Bond prices move inversely with interest rates. When rates rise, existing bonds with lower coupons become less attractive, so their prices fall. A bond's duration measures its sensitivity to rate changes — a 7-year duration means a 1% rate rise causes roughly 7% price decline.
+
+Types of Bonds:
+- U.S. Treasury: Backed by the federal government; considered risk-free. T-bills (< 1 year), T-notes (2-10 years), T-bonds (20-30 years).
+- Municipal Bonds: Issued by state/local governments. Interest is often federal-tax-exempt.
+- Corporate Bonds: Issued by companies. Higher yields than Treasuries to compensate for default risk.
+- TIPS (Treasury Inflation-Protected Securities): Principal adjusts with inflation, protecting purchasing power.
+
+Stocks vs. Bonds in a Portfolio:
+Classic 60/40 portfolios hold 60% stocks and 40% bonds. Stocks drive growth; bonds provide stability and income. As investors approach retirement, the conventional wisdom is to shift toward more bonds to reduce volatility — though this varies by individual risk tolerance.

@@ -1,0 +1,62 @@
+Understanding Investment Risk
+
+Risk is the possibility that an investment's actual return will differ from its expected return — including the possibility of losing all or part of the invested capital. Effective investing requires understanding, measuring, and managing different types of risk.
+
+TYPES OF INVESTMENT RISK
+
+Market Risk (Systematic Risk):
+The risk that the entire market declines, affecting all investments regardless of quality. Cannot be diversified away. Sources: recessions, interest rate changes, geopolitical events, pandemics.
+Measurement: Beta (sensitivity to market movements). VIX (CBOE Volatility Index) measures implied market volatility.
+
+Specific Risk (Unsystematic Risk):
+Risk specific to a particular company or industry. A company's stock falls because of an earnings miss, CEO scandal, or product recall. Can be reduced through diversification. Owning 20+ uncorrelated stocks eliminates most specific risk.
+
+Interest Rate Risk:
+The risk that rising interest rates reduce the value of fixed-income investments. Most relevant for bonds: a 1% rate increase causes roughly a 7-8% loss on a 10-year bond.
+
+Inflation Risk (Purchasing Power Risk):
+The risk that investment returns don't keep pace with inflation. A savings account earning 0.5% when inflation is 3% generates a -2.5% real return. Equities and TIPS mitigate inflation risk better than cash or nominal bonds.
+
+Liquidity Risk:
+The risk of not being able to sell an investment quickly at a fair price. Real estate, private equity, and small-cap stocks have higher liquidity risk than large-cap stocks or U.S. Treasuries.
+
+Credit/Default Risk:
+For bonds: the risk that the issuer cannot make interest payments or repay principal. Rated by agencies (Moody's, S&P, Fitch). Investment-grade bonds (BBB- and above) have historically low default rates.
+
+Currency Risk:
+For international investments: the risk that currency exchange rate changes reduce returns. A U.S. investor earning 8% in European stocks loses value if the euro weakens against the dollar.
+
+Concentration Risk:
+Holding too much in a single stock, sector, or geography. Enron employees who held large company stock positions lost both their jobs and retirement savings when the company collapsed.
+
+Sequence of Returns Risk:
+The risk that the order of investment returns matters, especially near retirement. Retiring into a bear market forces selling assets at depressed prices to fund living expenses, permanently impairing the portfolio. This is why asset allocation should become more conservative as retirement approaches.
+
+MEASURING RISK
+
+Standard Deviation:
+The most common measure of portfolio volatility. The S&P 500 has historically shown ~15% annual standard deviation. Higher standard deviation = wider range of outcomes.
+
+Sharpe Ratio:
+(Portfolio Return - Risk-Free Rate) / Portfolio Standard Deviation
+Measures return per unit of risk. Higher is better. The S&P 500's long-run Sharpe ratio is approximately 0.4-0.5.
+
+Maximum Drawdown:
+The largest peak-to-trough decline. The S&P 500's worst drawdown was -57% during 2007-2009. Investors must be able to stomach their portfolio's maximum drawdown psychologically.
+
+Value at Risk (VaR):
+The maximum expected loss over a period at a given confidence level. "95% VaR of 5%" means there's a 5% chance of losing more than 5% in a single day.
+
+RISK TOLERANCE ASSESSMENT
+
+Factors determining appropriate risk tolerance:
+- Time horizon: Longer time horizons allow more risk (time to recover from drawdowns)
+- Income stability: Stable employment allows more portfolio risk
+- Savings rate: High savers can take more portfolio risk (contributions buffer losses)
+- Liquidity needs: Near-term needs require less volatile assets
+- Psychological tolerance: Can you sleep at night with a 30% drawdown?
+
+A simple test: If your $100,000 portfolio dropped to $70,000 (-30%) in 6 months, would you:
+a) Buy more (you can take high risk)
+b) Stay the course (moderate risk tolerance)
+c) Sell (you need a more conservative allocation)

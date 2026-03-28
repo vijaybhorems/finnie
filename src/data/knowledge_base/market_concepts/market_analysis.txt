@@ -1,0 +1,70 @@
+Market Analysis: Fundamental vs. Technical Approaches
+
+Investors use two primary frameworks to analyze securities and markets: fundamental analysis and technical analysis. Most professional investors use a combination of both.
+
+FUNDAMENTAL ANALYSIS
+
+Fundamental analysis evaluates a security's intrinsic value by examining the underlying business, industry, and macroeconomic factors.
+
+Company Analysis (Bottom-Up):
+
+Income Statement Analysis:
+- Revenue growth: Is the top line growing sustainably?
+- Gross margin: How much profit after direct costs? (Revenue - COGS) / Revenue
+- Operating margin: Profit after operating expenses, before interest and taxes
+- Net margin: Final profit percentage after all expenses and taxes
+- EPS trend: Earnings per share growth rate
+
+Balance Sheet Analysis:
+- Debt-to-Equity ratio: Total liabilities / Shareholder equity. Lower = less financial leverage risk
+- Current ratio: Current assets / Current liabilities. > 1.0 means can meet short-term obligations
+- Return on Equity (ROE): Net income / Shareholder equity. Measures management efficiency
+
+Cash Flow Analysis:
+- Free Cash Flow (FCF): Operating cash flow minus capital expenditures. The "real" earnings
+- FCF Yield: FCF per share / Stock price. Higher = potentially undervalued
+- Cash conversion cycle: How quickly does revenue turn into cash?
+
+Valuation Multiples:
+- P/E Ratio: Price / Earnings per share. Compare to peers and historical average
+- P/B Ratio: Price / Book value per share. < 1.0 can signal undervaluation
+- EV/EBITDA: Enterprise value / EBITDA. Useful for comparing companies with different capital structures
+- PEG Ratio: P/E / Earnings growth rate. PEG < 1.0 considered potentially undervalued
+
+Discounted Cash Flow (DCF):
+Estimates intrinsic value by projecting future free cash flows and discounting back to present value at the required rate of return (discount rate). DCF is theoretically the most rigorous valuation method but extremely sensitive to assumptions.
+
+TECHNICAL ANALYSIS
+
+Technical analysis studies price and volume data to forecast future price movements. It operates on the premise that all known information is reflected in price, and that price patterns repeat over time.
+
+Key Technical Indicators:
+
+Moving Averages:
+- Simple Moving Average (SMA): Average price over N periods
+- 50-day SMA: Medium-term trend indicator
+- 200-day SMA: Long-term trend indicator
+- Golden Cross: 50-day SMA crosses above 200-day SMA (bullish signal)
+- Death Cross: 50-day SMA crosses below 200-day SMA (bearish signal)
+
+Momentum Indicators:
+- RSI (Relative Strength Index): 0-100 oscillator. > 70 = overbought; < 30 = oversold
+- MACD (Moving Average Convergence Divergence): Difference between 12-day and 26-day EMAs. MACD crossing its signal line triggers buy/sell signals
+- Stochastic Oscillator: Compares closing price to price range over a period
+
+Volume Indicators:
+- On-Balance Volume (OBV): Cumulative volume flow; confirms price trends
+- Volume Profile: Price levels with highest trading volume act as support/resistance
+
+Support and Resistance:
+- Support: Price level where buying interest is historically strong
+- Resistance: Price level where selling interest historically overwhelms buying
+- Breakouts: When price moves decisively through support/resistance, often signals continuation
+
+Chart Patterns:
+- Head and Shoulders: Reversal pattern with three peaks; signals end of uptrend
+- Double Bottom: Two similar lows signal trend reversal to upside
+- Cup and Handle: Bullish continuation pattern
+
+Limitations:
+Efficient Market Hypothesis (EMH) challenges the premise of both types of analysis. In weak-form efficient markets, technical analysis cannot generate excess returns; in semi-strong efficiency, neither fundamental nor technical analysis beats the market. Empirical evidence is mixed — certain factors (value, momentum) show persistent return premia, but individual stock picking consistently underperforms.

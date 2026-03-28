@@ -1,0 +1,79 @@
+Retirement Planning: Building Financial Independence
+
+Retirement planning is the process of setting income goals for the retirement years and then taking steps to achieve those goals. It begins with identifying income sources, estimating expenses, and implementing a savings and investment strategy.
+
+THE RETIREMENT NUMBER: HOW MUCH DO YOU NEED?
+
+The 4% Rule (Bengen Rule):
+A widely-used guideline suggests you can safely withdraw 4% of your portfolio annually in retirement, adjusted for inflation, with a high probability the portfolio lasts 30 years. This means:
+
+Retirement Portfolio Needed = Annual Expenses in Retirement × 25
+
+Examples:
+- $50,000/year expenses → Need $1,250,000
+- $80,000/year expenses → Need $2,000,000
+- $100,000/year expenses → Need $2,500,000
+
+Caveats: The 4% rule assumes a 30-year retirement and a ~60/40 portfolio. With low interest rates and higher valuations, some researchers suggest 3.3-3.5% is more prudent. Flexible withdrawal strategies can extend the portfolio's life.
+
+Social Security:
+The average Social Security benefit (2024) is ~$1,900/month ($22,800/year). Benefits increase 8% per year you delay claiming past full retirement age (up to age 70). Delaying from 62 to 70 can double your benefit.
+
+THE POWER OF STARTING EARLY
+
+Time is the most powerful variable in retirement planning. Due to compound interest:
+
+Starting at 25, saving $500/month at 7% annual return:
+→ At 65: $1,307,000
+
+Starting at 35, saving $500/month at 7% annual return:
+→ At 65: $608,000
+
+Starting at 45, saving $500/month at 7% annual return:
+→ At 65: $262,000
+
+The 10-year delay from 25 to 35 costs more than $700,000 — despite making only $60,000 less in contributions.
+
+THE THREE-BUCKET STRATEGY FOR RETIREMENT INCOME
+
+A popular approach for managing retirement portfolio withdrawals:
+
+Bucket 1 — Safety (1-2 years of expenses):
+Cash, money market funds, short-term CDs. For near-term expenses; never invested in stocks. Prevents forced selling during downturns.
+
+Bucket 2 — Income (3-10 years):
+Bonds, dividend-paying stocks, balanced funds. Replenishes Bucket 1 as it's spent.
+
+Bucket 3 — Growth (10+ years):
+Stocks, REITs, growth assets. Grows over time to replenish Bucket 2 and protect against inflation.
+
+SAVING FOR RETIREMENT: PRACTICAL STEPS
+
+Step 1: Maximize Employer Match
+Always contribute enough to get the full employer match on your 401(k). This is a 50-100% instant return on investment.
+
+Step 2: Emergency Fund First
+Maintain 3-6 months of expenses in liquid savings before investing for retirement. This prevents forced liquidation of investments during emergencies.
+
+Step 3: Prioritize Tax-Advantaged Accounts
+401(k) → HSA → Roth IRA → 401(k) max → Taxable brokerage (see Retirement Accounts article)
+
+Step 4: Appropriate Asset Allocation
+Use age-appropriate allocation. A common guideline: subtract age from 110 to get stock percentage. Adjust based on risk tolerance.
+
+Step 5: Increase Savings Rate Over Time
+Target saving 15-20% of gross income for retirement. Automate contributions. Increase the rate by 1% each year or with every raise.
+
+CATCH-UP CONTRIBUTIONS
+
+Behind on savings? Age 50+ contribution limits are higher:
+- 401(k): +$7,500/year catch-up
+- IRA: +$1,000/year catch-up
+
+Working longer is also the most powerful catch-up — each additional year of work means one more year of contributions plus one fewer year of withdrawals, dramatically improving retirement security.
+
+REQUIRED MINIMUM DISTRIBUTIONS (RMDs)
+
+Traditional 401(k) and IRA holders must begin withdrawals at age 73. The amount is calculated by dividing the prior year-end account balance by an IRS life expectancy factor. Failing to take RMDs triggers a 25% excise tax on the amount not withdrawn.
+
+Roth IRAs and Roth 401(k)s (starting 2024) have no RMDs, providing flexibility for tax planning and estate planning.

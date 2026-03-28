@@ -1,0 +1,14 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.coverage
+htmlcov
+.env
+*.egg-info
+dist
+build
+.DS_Store
+data/faiss_index

@@ -1,0 +1,82 @@
+Setting and Achieving Financial Goals
+
+Financial goal planning transforms abstract desires ("I want to be rich") into concrete, achievable targets with specific strategies. Effective financial goals are SMART: Specific, Measurable, Achievable, Relevant, and Time-bound.
+
+CLASSIFYING FINANCIAL GOALS BY TIME HORIZON
+
+Short-Term Goals (0-3 years):
+High liquidity required; minimal market risk acceptable.
+Examples: Emergency fund, vacation fund, down payment for a car, wedding.
+Vehicles: High-yield savings accounts, money market funds, short-term CDs, Treasury bills.
+Current rates: HYSA yielding 4-5% APY are available from online banks.
+
+Medium-Term Goals (3-10 years):
+Moderate risk acceptable as time allows partial recovery from drawdowns.
+Examples: Home down payment, starting a business, children's early education.
+Vehicles: Conservative balanced funds (60/40), bond funds, conservative ETF portfolios.
+Strategy: Begin equity-heavy, shift to bonds as the goal date approaches.
+
+Long-Term Goals (10+ years):
+Higher risk tolerance; stocks can dominate given ample time to recover.
+Examples: Retirement, college funding for newborns, financial independence.
+Vehicles: Stock-heavy ETF portfolios, 401(k), Roth IRA, 529 plans.
+
+THE EMERGENCY FUND: THE FOUNDATION
+
+Before investing for any goal, establish an emergency fund:
+- Amount: 3-6 months of essential expenses (rent/mortgage, utilities, food, insurance, minimum debt payments)
+- Location: High-yield savings account (liquid, FDIC-insured)
+- Rationale: Prevents liquidating investments at losses during financial emergencies
+
+HIGH-PRIORITY FINANCIAL GOALS
+
+Debt Elimination:
+High-interest debt (credit cards at 20-25% APR) should be paid off before any investing outside employer match. No investment reliably returns 20%+ annually. The "avalanche method" (highest interest first) minimizes total interest paid; "snowball method" (smallest balance first) provides psychological momentum.
+
+Home Purchase:
+For a 20% down payment on a $400,000 home, you need $80,000. At $1,500/month savings:
+- 4.4 years without investment returns
+- 4.0 years with 5% return in a conservative portfolio
+Consider: Property taxes, insurance, maintenance (typically 1-3% of home value annually) add significant ongoing costs beyond the mortgage.
+
+College Education Funding:
+529 Plans: State-sponsored, tax-advantaged education savings plans. Contributions aren't federally deductible but grow tax-free; withdrawals for qualified education expenses are tax-free.
+2024 contribution limits: No annual limit (but gift tax considerations above $18,000/year)
+Use the 1/3 rule as a starting point: target saving 1/3 of projected costs; borrow 1/3; pay 1/3 from current income.
+
+FINANCIAL INDEPENDENCE / EARLY RETIREMENT (FIRE)
+
+The FIRE movement targets financial independence before traditional retirement age.
+
+Coast FIRE: Save enough early that compound growth will reach the retirement number without additional contributions, freeing you to work only to cover current expenses.
+
+Lean FIRE: Very frugal lifestyle; smaller portfolio needed ($500K-$750K range).
+
+Fat FIRE: Maintain current lifestyle in retirement; requires larger portfolio ($2M+).
+
+The FIRE Formula:
+Years to FI = ln(Portfolio Target / Initial Savings) / ln(1 + Annual Return) (simplified)
+
+The savings rate is the dominant variable:
+- 10% savings rate → ~40 years to FI
+- 25% savings rate → ~32 years to FI
+- 50% savings rate → ~17 years to FI
+- 75% savings rate → ~7 years to FI
+
+GOAL PLANNING WITH INFLATION
+
+All long-term goals must account for inflation. Using the Rule of 72:
+At 3% inflation, prices double every 24 years.
+A college education costing $50,000 today will cost ~$90,000 in 20 years.
+
+For retirement goals, use real returns (nominal return minus inflation):
+If stocks return 10% and inflation is 3%, the real return is ~7%.
+Target retirement portfolios must grow enough in real terms to fund real (inflation-adjusted) expenses.
+
+BEHAVIORAL FINANCE: THE HUMAN ELEMENT
+
+Goal-setting must account for behavioral biases:
+- Hyperbolic discounting: We overvalue the present; automate savings to overcome present bias
+- Mental accounting: Treat all money as equal; don't keep savings at 0.5% while carrying credit card debt
+- Loss aversion: Losses feel twice as painful as equivalent gains; design portfolios for tolerance, not just optimization
+- Overconfidence: Most investors believe they're above-average; use low-cost index funds rather than individual stock picking

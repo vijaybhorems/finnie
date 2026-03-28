@@ -1,0 +1,76 @@
+app:
+  name: "Finnie - AI Finance Assistant"
+  version: "1.0.0"
+  debug: false
+  log_level: "INFO"
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  temperature: 0.1
+  max_tokens: 4096
+
+embeddings:
+  model: "all-MiniLM-L6-v2"
+  dimension: 384
+
+rag:
+  chunk_size: 512
+  chunk_overlap: 64
+  top_k: 5
+  index_path: "data/faiss_index"
+  knowledge_base_path: "src/data/knowledge_base"
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  ttl_seconds: 3600  # 1 hour default cache TTL
+
+apis:
+  alpha_vantage:
+    base_url: "https://www.alphavantage.co/query"
+    rate_limit_per_minute: 5  # Free tier limit
+  fred:
+    base_url: "https://api.stlouisfed.org/fred"
+    rate_limit_per_minute: 120
+  news_api:
+    base_url: "https://newsapi.org/v2"
+    page_size: 20
+  sec_edgar:
+    base_url: "https://efts.sec.gov/LATEST/search-index"
+
+agents:
+  finance_qa:
+    name: "Finance Q&A Agent"
+    description: "Answers general financial education questions"
+    data_sources: ["fred", "rag"]
+  portfolio:
+    name: "Portfolio Analysis Agent"
+    description: "Analyzes user portfolios with metrics and recommendations"
+    data_sources: ["yfinance", "alpha_vantage"]
+  market_analysis:
+    name: "Market Analysis Agent"
+    description: "Provides real-time market insights and technical analysis"
+    data_sources: ["alpha_vantage", "yfinance"]
+  goal_planning:
+    name: "Goal Planning Agent"
+    description: "Assists with financial goal setting based on risk appetite"
+    data_sources: ["fred"]
+  news_synthesizer:
+    name: "News Synthesizer Agent"
+    description: "Summarizes and contextualizes financial news"
+    data_sources: ["news_api", "sec_edgar"]
+  tax_education:
+    name: "Tax Education Agent"
+    description: "Explains tax concepts and account types"
+    data_sources: ["rag"]
+
+workflow:
+  max_iterations: 10
+  timeout_seconds: 60
+
+ui:
+  port: 8501
+  theme: "dark"
+  max_conversation_history: 50

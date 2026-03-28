@@ -1,0 +1,74 @@
+Key Economic Indicators Every Investor Should Know
+
+Economic indicators are statistics that provide information about the health and direction of an economy. Investors use them to assess market conditions and adjust portfolio positioning.
+
+LEADING INDICATORS (Predict future economic activity)
+
+Yield Curve:
+The relationship between short-term and long-term Treasury yields. Normal: Long-term yields higher than short-term (positive slope). Inverted: Short-term yields exceed long-term (negative slope) — historically the most reliable recession predictor with 6-18 month lead time.
+
+2Y-10Y Treasury Spread: The difference between the 10-year and 2-year Treasury yields. Inversion (negative spread) preceded every U.S. recession since 1955 with no false positives.
+
+ISM Manufacturing PMI:
+Purchasing Managers' Index surveys supply chain managers. Above 50 = expansion; below 50 = contraction. Released the first business day of each month.
+
+Consumer Confidence Index (CCI):
+Conference Board survey measuring consumers' assessment of current economic conditions and expectations. High confidence → increased spending. Leads consumption by 1-2 quarters.
+
+Building Permits:
+New construction permits indicate future housing sector activity. Housing has outsized economic multiplier effects.
+
+S&P 500 Stock Market:
+Itself a leading indicator — markets anticipate economic conditions 6-12 months ahead. The market's peak typically precedes recessions by 6-12 months.
+
+COINCIDENT INDICATORS (Measure current economic activity)
+
+GDP (Gross Domestic Product):
+Total value of all goods and services produced. U.S. GDP growth: ~2% average; 3%+ = strong growth.
+Two consecutive quarters of negative GDP growth = technical recession.
+The Bureau of Economic Analysis (BEA) releases GDP quarterly with two subsequent revisions.
+
+Employment:
+Non-Farm Payrolls (NFP): Released first Friday of each month by Bureau of Labor Statistics. Most-watched monthly economic report. Expected vs. actual moves markets significantly.
+Unemployment Rate: Headline U-3 rate. Full employment widely considered ~4-5%.
+U-6 Rate: Broader measure including discouraged workers and part-time-for-economic-reasons. More comprehensive picture of labor market slack.
+
+Industrial Production:
+Federal Reserve measure of output from manufacturing, mining, and utilities. Monthly basis.
+
+LAGGING INDICATORS (Confirm trends already underway)
+
+CPI (Consumer Price Index):
+Measures the average change in prices paid by consumers. Released monthly by BLS.
+Core CPI excludes food and energy (more volatile components).
+The Federal Reserve targets 2% inflation (measured by PCE, a related indicator).
+
+Federal Funds Rate:
+The Fed raises rates to combat inflation; cuts rates to stimulate a slowing economy. The FOMC meets 8 times/year. Rate decisions move bond markets, stock valuations, and the dollar.
+
+The Fed's dual mandate: Price stability (2% inflation) AND maximum employment.
+
+Credit: Lending activity confirms economic recovery (businesses and consumers borrow when confident).
+
+SECTOR ROTATION AND THE ECONOMIC CYCLE
+
+Different sectors outperform at different phases:
+
+Early Cycle (Recovery): Financials, Consumer Discretionary — rate cuts boost lending; consumers resume spending
+Mid Cycle (Expansion): Technology, Industrials — business investment rises; tech grows
+Late Cycle (Slowing): Energy, Materials — commodity prices peak; inflation concerns
+Recession: Healthcare, Consumer Staples, Utilities — defensive sectors with inelastic demand
+
+THE FED AND INTEREST RATES: MARKET IMPACT
+
+Fed Funds Rate Effect on Assets:
+- Rate cuts: Positive for stocks and bonds; negative for dollar
+- Rate hikes: Negative for stocks and bonds (especially long duration); positive for dollar
+
+The Fed Rate Cycle:
+- Accommodative (low rates): Encourages borrowing, investment, risk-taking
+- Tightening (raising rates): Reduces inflation but slows growth; increases discount rate on future earnings, compressing stock valuations
+
+Interest Rate Sensitivity by Sector:
+- Rate-sensitive (hurt by rising rates): Utilities, REITs, high-growth tech (long-duration assets)
+- Rate-beneficiaries (helped by rising rates): Banks (net interest margin expands), Insurance

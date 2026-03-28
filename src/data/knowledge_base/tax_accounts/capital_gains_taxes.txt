@@ -1,0 +1,73 @@
+Capital Gains Taxes: What Every Investor Must Know
+
+Capital gains taxes apply when you sell an investment for more than you paid. Understanding the rules can significantly impact your after-tax investment returns.
+
+SHORT-TERM vs. LONG-TERM CAPITAL GAINS
+
+Short-Term Capital Gains:
+Assets held for ONE YEAR OR LESS. Taxed as ordinary income (same rate as your salary).
+Tax rates: 10%, 12%, 22%, 24%, 32%, 35%, or 37% depending on taxable income.
+
+Long-Term Capital Gains:
+Assets held for MORE THAN ONE YEAR. Preferential tax rates:
+- 0%: Single filers with taxable income up to $47,025; Married filing jointly up to $94,050 (2024)
+- 15%: Most middle and upper-middle income earners
+- 20%: Single filers above $518,900; MFJ above $583,750 (2024)
+
+The Holding Period Advantage:
+Selling after one year can reduce your tax rate dramatically. A high-income investor selling after 11 months pays 37% federal tax; waiting one more month reduces it to 20% — a 17 percentage point difference.
+
+NET INVESTMENT INCOME TAX (NIIT)
+
+An additional 3.8% tax on investment income (including capital gains) for high earners:
+- Single filers with Modified AGI above $200,000
+- Married filing jointly above $250,000
+
+This means high earners may pay up to 23.8% on long-term capital gains (20% + 3.8%).
+
+COST BASIS
+
+Cost basis is what you paid for an investment, including commissions. Capital gain = Sale price - Cost basis.
+
+Cost Basis Methods:
+- FIFO (First In, First Out): Default for most brokers. Oldest shares sold first.
+- Specific Identification: Choose exactly which shares to sell. Allows selling highest-cost shares to minimize gains.
+- Average Cost: Used for mutual funds. Average of all purchase prices.
+
+Choosing the right method can minimize taxes significantly. If you have shares purchased at various prices, specific identification allows you to sell the most expensive shares first, minimizing your gain.
+
+TAX-LOSS HARVESTING
+
+Selling investments at a loss to offset capital gains — a powerful tax-planning strategy.
+
+How It Works:
+1. You have $10,000 in capital gains from selling Stock A
+2. Stock B is down $4,000 from your purchase price
+3. Selling Stock B creates a $4,000 capital loss
+4. Your net taxable gain is reduced to $6,000
+
+Rules:
+- Capital losses first offset capital gains (short-term losses offset short-term gains first, then long-term)
+- Excess losses up to $3,000/year can offset ordinary income
+- Remaining losses carry forward indefinitely to future years
+
+Wash-Sale Rule:
+You cannot buy the same (or substantially identical) security within 30 days before or after selling it at a loss. The loss is disallowed. Solution: Buy a similar but not identical ETF (e.g., sell VTI, buy SCHB to maintain market exposure).
+
+QUALIFIED DIVIDENDS
+
+Dividends from U.S. companies and qualified foreign companies held for the required holding period are taxed at long-term capital gains rates (0%, 15%, or 20%) rather than ordinary income rates. "Non-qualified" dividends are taxed as ordinary income.
+
+INHERITED ASSETS AND STEPPED-UP BASIS
+
+Assets inherited at death receive a "step-up" in cost basis to the fair market value at the date of death. This eliminates all unrealized capital gains — an enormous benefit for heirs.
+
+Example: Your parent bought Apple at $10/share (now worth $200). You inherit and immediately sell at $200. Your gain is $0 — basis stepped up to $200 at death.
+
+TAX-EFFICIENT INVESTING STRATEGIES
+
+1. Hold index funds and ETFs in taxable accounts (low turnover = fewer taxable events)
+2. Hold high-yield bonds and REITs in tax-advantaged accounts (ordinary income)
+3. Maximize tax-advantaged accounts before taxable accounts
+4. Use tax-loss harvesting systematically in taxable accounts
+5. Consider asset location: high-growth assets in Roth, income-producing in Traditional

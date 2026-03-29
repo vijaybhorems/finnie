@@ -2,6 +2,8 @@
 
 A production-ready multi-agent AI system for democratizing financial education. Built with LangGraph, Claude Sonnet, FAISS, and Streamlit.
 
+Try it out: https://finnie-app-eycr2lj5ga-uc.a.run.app/
+
 ## Architecture Overview
 
 ```

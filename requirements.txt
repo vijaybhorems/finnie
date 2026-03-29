@@ -19,7 +19,7 @@ feedparser>=6.0.11
 redis>=5.0.0
 
 # Web UI
-streamlit>=1.40.0
+streamlit[auth]>=1.42.0
 plotly>=5.24.0
 pandas>=2.2.0
 

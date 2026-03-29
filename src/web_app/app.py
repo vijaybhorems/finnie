@@ -9,9 +9,20 @@ _ROOT = Path(__file__).parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# Bootstrap auth secrets from env vars (Cloud Run) before any Streamlit call
+from src.web_app.auth_bootstrap import bootstrap_auth_secrets
+
+bootstrap_auth_secrets()
+
 import streamlit as st
 
 from src.utils.logger import get_logger, setup_logging
+from src.web_app.auth import (
+    is_user_authorized,
+    render_login_page,
+    render_unauthorized_page,
+    render_user_info_sidebar,
+)
 
 setup_logging()
 logger = get_logger(__name__)
@@ -23,6 +34,15 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Authentication gate ───────────────────────────────────────────────────────
+if not st.user.is_logged_in:
+    render_login_page()
+    st.stop()
+
+if not is_user_authorized():
+    render_unauthorized_page()
+    st.stop()
 
 # ── Import page modules ───────────────────────────────────────────────────────
 from src.web_app.pages.chat import render_chat_page
@@ -81,6 +101,9 @@ def render_sidebar() -> str:
         st.divider()
         st.caption("⚠️ Finnie provides financial education, not personalized advice. "
                    "Always consult a licensed financial advisor.")
+
+        # Show logged-in user info at the bottom of the sidebar
+        render_user_info_sidebar()
 
     return page
 

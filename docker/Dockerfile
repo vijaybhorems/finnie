@@ -21,6 +21,11 @@ COPY . .
 # Suppress noisy transformers lazy-import warnings (torchvision not needed)
 ENV TRANSFORMERS_VERBOSITY=error
 ENV TOKENIZERS_PARALLELISM=false
+# Env var form — most reliable way to disable Streamlit file watcher
+ENV STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
+
+# Copy Streamlit config (belt-and-suspenders with env var + config file)
+COPY .streamlit/config.toml /app/.streamlit/config.toml
 
 EXPOSE 8501
 

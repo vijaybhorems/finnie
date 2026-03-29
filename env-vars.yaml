@@ -1,0 +1,6 @@
+REDIS_HOST: "10.86.167.251"
+REDIS_PORT: "6379"
+LOG_LEVEL: "INFO"
+DEBUG: "false"
+AUTH_REDIRECT_URI: "https://finnie-app-eycr2lj5ga-uc.a.run.app/oauth2callback"
+ALLOWED_EMAILS: "bhore.vijay@gmail.com,kadam.shital.d@gmail.com,vijaybhorems@gmail.com,operations@interviewkickstart.com,kadam.s.d.2009@gmail.com"

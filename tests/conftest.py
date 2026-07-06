@@ -24,6 +24,8 @@ def clear_lru_caches():
     from src.core.config import get_settings
     from src.core.llm import get_llm
     from src.workflow.graph import build_graph
+    from src.utils.circuit_breaker import reset_breakers
     get_settings.cache_clear()
     get_llm.cache_clear()
     build_graph.cache_clear()
+    reset_breakers()

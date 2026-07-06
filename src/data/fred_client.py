@@ -7,9 +7,12 @@ import requests
 
 from src.core.config import get_settings
 from src.utils.cache import get_cache
+from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_BREAKER_NAME = "fred"
 
 # Key FRED series IDs used across agents
 FRED_SERIES = {
@@ -38,13 +41,20 @@ class FredClient:
     def _call(self, endpoint: str, params: dict[str, str]) -> dict[str, Any]:
         if not self._api_key:
             return {"error": "FRED API key not configured"}
+
+        breaker = get_breaker(_BREAKER_NAME)
+        if not breaker.allow():
+            return {"error": "circuit_open"}
+
         params["api_key"] = self._api_key
         params["file_type"] = "json"
         try:
             resp = requests.get(f"{self._base_url}/{endpoint}", params=params, timeout=10)
             resp.raise_for_status()
+            breaker.record_success()
             return resp.json()
         except Exception as exc:
+            breaker.record_failure()
             logger.error("fred_request_error", endpoint=endpoint, error=str(exc))
             return {"error": str(exc)}
 
@@ -69,6 +79,10 @@ class FredClient:
             }
             self._cache.set(key, result, ttl=3600)
             return result
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
         return {"series_id": series_id, "error": data.get("error", "No data")}
 
     def get_series_history(self, series_id: str, limit: int = 24) -> list[dict[str, Any]]:
@@ -88,6 +102,10 @@ class FredClient:
             result = [{"date": o["date"], "value": o["value"]} for o in observations]
             self._cache.set(key, result, ttl=3600)
             return result
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
         return []
 
     def get_macro_snapshot(self) -> dict[str, Any]:

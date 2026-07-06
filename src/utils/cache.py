@@ -67,6 +67,13 @@ class Cache:
     def _default_ttl(self) -> int:
         return self._settings.redis.ttl_seconds
 
+    @property
+    def _stale_ttl(self) -> int:
+        return self._settings.redis.stale_ttl_seconds
+
+    def _stale_key(self, key: str) -> str:
+        return key.replace("finnie:", "finnie:stale:", 1)
+
     def get(self, key: str) -> Optional[Any]:
         try:
             if self._redis:
@@ -80,14 +87,21 @@ class Cache:
             logger.warning("cache_get_error", key=key, error=str(exc))
             return None
 
+    def get_stale(self, key: str) -> Optional[Any]:
+        """Return the stale mirror copy for `key`, ignoring freshness."""
+        return self.get(self._stale_key(key))
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         ttl = ttl or self._default_ttl
         serialized = json.dumps(value)
+        stale_key = self._stale_key(key)
         try:
             if self._redis:
                 self._redis.setex(key, ttl, serialized)
+                self._redis.setex(stale_key, self._stale_ttl, serialized)
             else:
                 self._fallback.set(key, serialized, ttl)
+                self._fallback.set(stale_key, serialized, self._stale_ttl)
         except Exception as exc:
             logger.warning("cache_set_error", key=key, error=str(exc))
 

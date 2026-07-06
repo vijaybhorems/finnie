@@ -69,6 +69,7 @@ class RedisConfig(BaseModel):
     port: int = 6379
     db: int = 0
     ttl_seconds: int = 3600
+    stale_ttl_seconds: int = 604800  # 7 days; retention for stale cache mirror
 
 
 class APIConfig(BaseModel):
@@ -81,6 +82,12 @@ class APIConfig(BaseModel):
 class WorkflowConfig(BaseModel):
     max_iterations: int = 10
     timeout_seconds: int = 60
+
+
+class CircuitBreakerConfig(BaseModel):
+    failure_threshold: int = 5
+    recovery_timeout_seconds: int = 60
+    success_threshold: int = 1
 
 
 class AppConfig(BaseModel):
@@ -109,6 +116,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = RedisConfig()
     apis: APIConfig = APIConfig()
     workflow: WorkflowConfig = WorkflowConfig()
+    circuit_breaker: CircuitBreakerConfig = CircuitBreakerConfig()
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -150,6 +158,8 @@ def get_settings() -> Settings:
         overrides["redis"] = RedisConfig(**redis_yaml)
     if "workflow" in yaml_data:
         overrides["workflow"] = WorkflowConfig(**yaml_data["workflow"])
+    if "circuit_breaker" in yaml_data:
+        overrides["circuit_breaker"] = CircuitBreakerConfig(**yaml_data["circuit_breaker"])
     if "app" in yaml_data:
         overrides["app"] = AppConfig(**yaml_data["app"])
 

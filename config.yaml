@@ -26,6 +26,7 @@ redis:
   port: 6379
   db: 0
   ttl_seconds: 3600  # 1 hour default cache TTL
+  stale_ttl_seconds: 604800  # 7 days; retention for stale cache mirror
 
 apis:
   alpha_vantage:
@@ -69,6 +70,11 @@ agents:
 workflow:
   max_iterations: 10
   timeout_seconds: 60
+
+circuit_breaker:
+  failure_threshold: 5
+  recovery_timeout_seconds: 60
+  success_threshold: 1
 
 ui:
   port: 8501

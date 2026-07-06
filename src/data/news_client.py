@@ -8,9 +8,14 @@ import requests
 
 from src.core.config import get_settings
 from src.utils.cache import get_cache
+from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_NEWSAPI_BREAKER = "newsapi"
+_RSS_BREAKER = "rss"
+_SEC_BREAKER = "sec_edgar"
 
 SEC_EDGAR_RSS = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=20&output=atom"
 
@@ -45,6 +50,10 @@ class NewsClient:
             logger.warning("newsapi_key_not_configured_falling_back_to_rss")
             return self._get_rss_headlines()
 
+        breaker = get_breaker(_NEWSAPI_BREAKER)
+        if not breaker.allow():
+            return self._get_rss_headlines()
+
         try:
             resp = requests.get(
                 f"{self._base_url}/everything",
@@ -71,9 +80,11 @@ class NewsClient:
                 }
                 for a in articles
             ]
+            breaker.record_success()
             self._cache.set(key, results, ttl=1800)  # 30 min
             return results
         except Exception as exc:
+            breaker.record_failure()
             logger.error("newsapi_error", error=str(exc))
             return self._get_rss_headlines()
 
@@ -84,7 +95,16 @@ class NewsClient:
         if cached:
             return cached
 
+        breaker = get_breaker(_RSS_BREAKER)
+        if not breaker.allow():
+            stale = self._cache.get_stale(key)
+            if stale is not None:
+                logger.warning("served_stale_cache", provider=_RSS_BREAKER, key=key)
+                return stale
+            return []
+
         results: list[dict[str, Any]] = []
+        any_success = False
         for source, url in FINANCIAL_RSS_FEEDS.items():
             try:
                 feed = feedparser.parse(url)
@@ -96,8 +116,14 @@ class NewsClient:
                         "published_at": entry.get("published", ""),
                         "description": entry.get("summary", "")[:300],
                     })
+                any_success = True
             except Exception as exc:
                 logger.warning("rss_feed_error", source=source, error=str(exc))
+
+        if any_success:
+            breaker.record_success()
+        else:
+            breaker.record_failure()
 
         self._cache.set(key, results, ttl=1800)
         return results
@@ -116,6 +142,14 @@ class NewsClient:
         if cached:
             return cached
 
+        breaker = get_breaker(_SEC_BREAKER)
+        if not breaker.allow():
+            stale = self._cache.get_stale(key)
+            if stale is not None:
+                logger.warning("served_stale_cache", provider=_SEC_BREAKER, key=key)
+                return stale
+            return []
+
         try:
             feed = feedparser.parse(SEC_EDGAR_RSS)
             results = [
@@ -127,8 +161,14 @@ class NewsClient:
                 }
                 for entry in feed.entries[:max_items]
             ]
+            breaker.record_success()
             self._cache.set(key, results, ttl=3600)
             return results
         except Exception as exc:
+            breaker.record_failure()
             logger.error("sec_edgar_error", error=str(exc))
+            stale = self._cache.get_stale(key)
+            if stale is not None:
+                logger.warning("served_stale_cache", provider=_SEC_BREAKER, key=key)
+                return stale
             return []

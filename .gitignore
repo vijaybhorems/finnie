@@ -6,3 +6,10 @@ htmlcov/
 .pytest_cache/
 .venv/
 .streamlit/secrets.toml
+design_doc_template.md
+explore_prompt.md
+implement_plan.md
+make_proposals_prompt.md
+plan_prompt.md
+research_prompt.md
+review_prompt.md

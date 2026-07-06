@@ -8,11 +8,13 @@ import requests
 
 from src.core.config import get_settings
 from src.utils.cache import get_cache
+from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 _RATE_LIMIT_DELAY = 12  # seconds between calls on free tier (5/min)
+_BREAKER_NAME = "alpha_vantage"
 
 
 class AlphaVantageClient:
@@ -29,6 +31,11 @@ class AlphaVantageClient:
         if not self._api_key:
             return {"error": "Alpha Vantage API key not configured"}
 
+        # Short-circuit before the rate-limit sleep when the breaker is open.
+        breaker = get_breaker(_BREAKER_NAME)
+        if not breaker.allow():
+            return {"error": "circuit_open"}
+
         # Rate limit enforcement (free tier: 5 calls/min)
         elapsed = time.time() - self._last_call
         if elapsed < _RATE_LIMIT_DELAY:
@@ -39,11 +46,13 @@ class AlphaVantageClient:
             resp = requests.get(self._base_url, params=params, timeout=10)
             resp.raise_for_status()
             self._last_call = time.time()
+            breaker.record_success()
             data = resp.json()
             if "Note" in data:
                 logger.warning("alpha_vantage_rate_limit_note", note=data["Note"])
             return data
         except Exception as exc:
+            breaker.record_failure()
             logger.error("alpha_vantage_request_error", error=str(exc), params=params)
             return {"error": str(exc)}
 
@@ -70,6 +79,11 @@ class AlphaVantageClient:
         }
         if "error" not in data:
             self._cache.set(key, result, ttl=300)
+            return result
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
         return result
 
     def get_rsi(self, ticker: str, interval: str = "daily", time_period: int = 14) -> dict[str, Any]:
@@ -98,6 +112,10 @@ class AlphaVantageClient:
             }
             self._cache.set(key, result, ttl=3600)
             return result
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
         return {"ticker": ticker, "error": data.get("error", "No RSI data")}
 
     def get_macd(self, ticker: str, interval: str = "daily") -> dict[str, Any]:
@@ -123,6 +141,10 @@ class AlphaVantageClient:
             }
             self._cache.set(key, result, ttl=3600)
             return result
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
         return {"ticker": ticker, "error": data.get("error", "No MACD data")}
 
     def get_sector_performance(self) -> dict[str, Any]:
@@ -143,6 +165,10 @@ class AlphaVantageClient:
             }
             self._cache.set(key, result, ttl=1800)
             return result
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
         return {"error": data.get("error", "Sector data unavailable")}
 
     def get_income_statement(self, ticker: str) -> dict[str, Any]:
@@ -157,4 +183,8 @@ class AlphaVantageClient:
         if reports:
             self._cache.set(key, reports, ttl=86400)  # 24h
             return {"ticker": ticker.upper(), "annual_reports": reports}
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return {"ticker": ticker.upper(), "annual_reports": stale}
         return {"ticker": ticker, "error": "No income statement data"}

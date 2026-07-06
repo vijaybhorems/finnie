@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.utils.cache import CacheBackend
+from src.utils.circuit_breaker import CircuitBreaker, CircuitState
 
 
 class TestCacheBackend:
@@ -56,6 +57,56 @@ class TestUnifiedCache:
             cache = Cache()
         key = cache.cache_key("yf", "price", "AAPL")
         assert key == "finnie:yf:price:AAPL"
+
+    def test_get_stale_returns_value_after_fresh_expiry(self):
+        import time
+        from src.utils.cache import Cache
+        with patch.object(Cache, "_init_redis", return_value=None):
+            cache = Cache()
+        key = cache.cache_key("yf", "price", "AAPL")
+        cache.set(key, {"price": 100}, ttl=1)
+
+        # Fresh copy expires, but the stale mirror (7d) persists.
+        time.sleep(1.1)
+        assert cache.get(key) is None
+        assert cache.get_stale(key) == {"price": 100}
+
+
+class TestCircuitBreaker:
+    def _breaker(self, **kwargs):
+        defaults = dict(name="test", failure_threshold=3, recovery_timeout=60, success_threshold=1)
+        defaults.update(kwargs)
+        return CircuitBreaker(**defaults)
+
+    def test_opens_after_threshold_failures(self):
+        cb = self._breaker(failure_threshold=3)
+        assert cb.allow() is True
+        for _ in range(3):
+            cb.record_failure()
+        assert cb.state is CircuitState.OPEN
+        assert cb.allow() is False
+
+    def test_half_open_after_recovery_timeout(self):
+        cb = self._breaker(failure_threshold=1, recovery_timeout=30)
+        cb.record_failure()
+        assert cb.allow() is False
+        with patch("src.utils.circuit_breaker.time.time", return_value=cb._opened_at + 31):
+            assert cb.allow() is True
+            assert cb.state is CircuitState.HALF_OPEN
+
+    def test_half_open_success_closes(self):
+        cb = self._breaker(failure_threshold=1, recovery_timeout=0)
+        cb.record_failure()
+        assert cb.allow() is True  # transitions to HALF_OPEN
+        cb.record_success()
+        assert cb.state is CircuitState.CLOSED
+
+    def test_half_open_failure_reopens(self):
+        cb = self._breaker(failure_threshold=1, recovery_timeout=0)
+        cb.record_failure()
+        assert cb.allow() is True  # HALF_OPEN
+        cb.record_failure()
+        assert cb.state is CircuitState.OPEN
 
 
 class TestYFinanceClient:
@@ -109,6 +160,7 @@ class TestFredClient:
     def test_get_series_latest_no_api_key(self, mock_cache, mock_requests):
         mock_cache_inst = MagicMock()
         mock_cache_inst.get.return_value = None
+        mock_cache_inst.get_stale.return_value = None
         mock_cache_inst.cache_key.return_value = "key"
         mock_cache.return_value = mock_cache_inst
 
@@ -119,6 +171,96 @@ class TestFredClient:
             result = client.get_series_latest("FEDFUNDS")
 
         assert "error" in result
+
+
+class TestAlphaVantageCircuitBreaker:
+    @patch("src.data.alpha_vantage_client.time")
+    @patch("src.data.alpha_vantage_client.requests")
+    @patch("src.data.alpha_vantage_client.get_cache")
+    def test_open_breaker_skips_sleep_and_network(self, mock_cache, mock_requests, mock_time):
+        from src.data.alpha_vantage_client import AlphaVantageClient
+        from src.utils.circuit_breaker import get_breaker
+
+        mock_cache.return_value = MagicMock(get=MagicMock(return_value=None), cache_key=MagicMock(return_value="finnie:av:quote:AAPL"))
+
+        client = AlphaVantageClient()
+        # Trip the breaker.
+        breaker = get_breaker("alpha_vantage")
+        for _ in range(breaker._failure_threshold):
+            breaker.record_failure()
+
+        result = client._call({"function": "GLOBAL_QUOTE", "symbol": "AAPL"})
+
+        assert result == {"error": "circuit_open"}
+        mock_time.sleep.assert_not_called()
+        mock_requests.get.assert_not_called()
+
+
+class TestYFinanceStaleFallback:
+    @patch("src.data.yfinance_client.yf")
+    @patch("src.data.yfinance_client.get_cache")
+    def test_open_breaker_serves_stale(self, mock_cache, mock_yf):
+        from src.data.yfinance_client import YFinanceClient
+        from src.utils.circuit_breaker import get_breaker
+
+        stale_value = {"ticker": "AAPL", "current_price": 199.0}
+        mock_cache.return_value = MagicMock(
+            get=MagicMock(return_value=None),
+            get_stale=MagicMock(return_value=stale_value),
+            cache_key=MagicMock(return_value="finnie:yf:price:AAPL"),
+        )
+
+        breaker = get_breaker("yfinance")
+        for _ in range(breaker._failure_threshold):
+            breaker.record_failure()
+
+        client = YFinanceClient()
+        result = client.get_current_price("AAPL")
+
+        assert result == stale_value
+        mock_yf.Ticker.assert_not_called()
+
+    @patch("src.data.yfinance_client.yf")
+    @patch("src.data.yfinance_client.get_cache")
+    def test_open_breaker_error_when_no_stale(self, mock_cache, mock_yf):
+        from src.data.yfinance_client import YFinanceClient
+        from src.utils.circuit_breaker import get_breaker
+
+        mock_cache.return_value = MagicMock(
+            get=MagicMock(return_value=None),
+            get_stale=MagicMock(return_value=None),
+            cache_key=MagicMock(return_value="finnie:yf:price:AAPL"),
+        )
+
+        breaker = get_breaker("yfinance")
+        for _ in range(breaker._failure_threshold):
+            breaker.record_failure()
+
+        client = YFinanceClient()
+        result = client.get_current_price("AAPL")
+
+        assert result["error"] == "circuit_open"
+        mock_yf.Ticker.assert_not_called()
+
+
+class TestFredStaleFallback:
+    @patch("src.data.fred_client.requests")
+    @patch("src.data.fred_client.get_cache")
+    def test_failure_serves_stale(self, mock_cache, mock_requests):
+        from src.data.fred_client import FredClient
+
+        stale_value = {"series_id": "FEDFUNDS", "date": "2024-01-01", "value": "5.33"}
+        mock_cache.return_value = MagicMock(
+            get=MagicMock(return_value=None),
+            get_stale=MagicMock(return_value=stale_value),
+            cache_key=MagicMock(return_value="finnie:fred:latest:FEDFUNDS"),
+        )
+        mock_requests.get.side_effect = Exception("network down")
+
+        client = FredClient()
+        result = client.get_series_latest("FEDFUNDS")
+
+        assert result == stale_value
 
 
 class TestNewsClient:

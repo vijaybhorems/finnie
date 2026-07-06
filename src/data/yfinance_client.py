@@ -7,9 +7,12 @@ import pandas as pd
 import yfinance as yf
 
 from src.utils.cache import get_cache
+from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_BREAKER_NAME = "yfinance"
 
 
 class YFinanceClient:
@@ -18,12 +21,24 @@ class YFinanceClient:
     def __init__(self) -> None:
         self._cache = get_cache()
 
+    def _stale_or(self, key: str, default: Any) -> Any:
+        """Return the stale cached value for `key` if present, else `default`."""
+        stale = self._cache.get_stale(key)
+        if stale is not None:
+            logger.warning("served_stale_cache", provider=_BREAKER_NAME, key=key)
+            return stale
+        return default
+
     def get_current_price(self, ticker: str) -> dict[str, Any]:
         """Return latest price, change%, volume for a ticker."""
         key = self._cache.cache_key("yf", "price", ticker.upper())
         cached = self._cache.get(key)
         if cached:
             return cached
+
+        breaker = get_breaker(_BREAKER_NAME)
+        if not breaker.allow():
+            return self._stale_or(key, {"ticker": ticker, "error": "circuit_open"})
 
         try:
             stock = yf.Ticker(ticker)
@@ -44,11 +59,13 @@ class YFinanceClient:
                 )
             else:
                 data["change_pct"] = None
+            breaker.record_success()
             self._cache.set(key, data, ttl=300)  # 5-min cache for prices
             return data
         except Exception as exc:
+            breaker.record_failure()
             logger.error("yfinance_price_error", ticker=ticker, error=str(exc))
-            return {"ticker": ticker, "error": str(exc)}
+            return self._stale_or(key, {"ticker": ticker, "error": str(exc)})
 
     def get_historical_prices(
         self,
@@ -61,6 +78,10 @@ class YFinanceClient:
         cached = self._cache.get(key)
         if cached:
             return cached
+
+        breaker = get_breaker(_BREAKER_NAME)
+        if not breaker.allow():
+            return self._stale_or(key, [])
 
         try:
             df: pd.DataFrame | None = yf.download(ticker, period=period, interval=interval, progress=False)
@@ -76,11 +97,13 @@ class YFinanceClient:
                 for k, v in r.items():
                     if hasattr(v, "isoformat"):
                         r[k] = v.isoformat()
+            breaker.record_success()
             self._cache.set(key, records, ttl=3600)
             return records
         except Exception as exc:
+            breaker.record_failure()
             logger.error("yfinance_history_error", ticker=ticker, error=str(exc))
-            return []
+            return self._stale_or(key, [])
 
     def get_fundamentals(self, ticker: str) -> dict[str, Any]:
         """Return key fundamental metrics (P/E, beta, dividends, etc.)."""
@@ -88,6 +111,10 @@ class YFinanceClient:
         cached = self._cache.get(key)
         if cached:
             return cached
+
+        breaker = get_breaker(_BREAKER_NAME)
+        if not breaker.allow():
+            return self._stale_or(key, {"ticker": ticker, "error": "circuit_open"})
 
         try:
             stock = yf.Ticker(ticker)
@@ -102,11 +129,13 @@ class YFinanceClient:
             ]
             data = {f: info.get(f) for f in fields}
             data["ticker"] = ticker.upper()
+            breaker.record_success()
             self._cache.set(key, data, ttl=3600)
             return data
         except Exception as exc:
+            breaker.record_failure()
             logger.error("yfinance_fundamentals_error", ticker=ticker, error=str(exc))
-            return {"ticker": ticker, "error": str(exc)}
+            return self._stale_or(key, {"ticker": ticker, "error": str(exc)})
 
     def get_portfolio_metrics(
         self, holdings: list[dict[str, Any]]

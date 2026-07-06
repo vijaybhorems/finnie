@@ -76,6 +76,14 @@ circuit_breaker:
   recovery_timeout_seconds: 60
   success_threshold: 1
 
+guardrail:
+  enabled: true  # pre-router finance/NSFW gate; fails closed on classifier error
+
+tracing:
+  enabled: false  # Arize Phoenix; enable and set endpoint to export spans
+  project_name: "finnie"
+  endpoint: ""  # e.g. http://localhost:4317
+
 ui:
   port: 8501
   theme: "dark"

@@ -33,6 +33,11 @@ pydantic-settings>=2.6.0
 # Logging
 structlog>=24.4.0
 
+# Observability / Tracing (Arize Phoenix + OpenInference)
+arize-phoenix>=6.0.0
+arize-phoenix-otel>=0.6.0
+openinference-instrumentation-langchain>=0.1.29
+
 # Testing
 pytest>=8.3.0
 pytest-asyncio>=0.24.0

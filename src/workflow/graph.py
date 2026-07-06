@@ -14,6 +14,7 @@ from src.agents.portfolio_agent import PortfolioAgent
 from src.agents.tax_education_agent import TaxEducationAgent
 from src.core.state import AgentType, FinnieState
 from src.utils.logger import get_logger
+from src.workflow.guardrail import guardrail_node, route_after_guardrail
 from src.workflow.router import router_node
 
 logger = get_logger(__name__)
@@ -87,6 +88,7 @@ def build_graph():
     graph = StateGraph(FinnieState)
 
     # Add nodes
+    graph.add_node("guardrail", guardrail_node)
     graph.add_node("router", router_node)
     graph.add_node("finance_qa", finance_qa_node)
     graph.add_node("portfolio", portfolio_node)
@@ -95,8 +97,18 @@ def build_graph():
     graph.add_node("news_synthesizer", news_synthesizer_node)
     graph.add_node("tax_education", tax_education_node)
 
-    # Start → router
-    graph.add_edge(START, "router")
+    # Start → guardrail (finance/NSFW gate before any routing)
+    graph.add_edge(START, "guardrail")
+
+    # Guardrail → router (allowed) or END (rejected, canned refusal already set)
+    graph.add_conditional_edges(
+        "guardrail",
+        route_after_guardrail,
+        {
+            "allowed": "router",
+            "rejected": END,
+        },
+    )
 
     # Router → conditional dispatch
     graph.add_conditional_edges(

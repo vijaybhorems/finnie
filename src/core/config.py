@@ -90,6 +90,23 @@ class CircuitBreakerConfig(BaseModel):
     success_threshold: int = 1
 
 
+class GuardrailConfig(BaseModel):
+    """Pre-router safety/topic gate configuration."""
+    enabled: bool = True
+    refusal_message: str = (
+        "I'm Finnie, a financial education assistant, so I can only help with "
+        "finance-related questions — things like investing, budgeting, markets, "
+        "taxes, and financial planning. Try asking me something in that area!"
+    )
+
+
+class TracingConfig(BaseModel):
+    """Arize Phoenix / OpenInference tracing configuration."""
+    enabled: bool = False
+    project_name: str = "finnie"
+    endpoint: str = ""  # e.g. http://localhost:4317 ; empty -> tracing stays disabled
+
+
 class AppConfig(BaseModel):
     name: str = "Finnie - AI Finance Assistant"
     version: str = "1.0.0"
@@ -117,6 +134,8 @@ class Settings(BaseSettings):
     apis: APIConfig = APIConfig()
     workflow: WorkflowConfig = WorkflowConfig()
     circuit_breaker: CircuitBreakerConfig = CircuitBreakerConfig()
+    guardrail: GuardrailConfig = GuardrailConfig()
+    tracing: TracingConfig = TracingConfig()
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -160,6 +179,10 @@ def get_settings() -> Settings:
         overrides["workflow"] = WorkflowConfig(**yaml_data["workflow"])
     if "circuit_breaker" in yaml_data:
         overrides["circuit_breaker"] = CircuitBreakerConfig(**yaml_data["circuit_breaker"])
+    if "guardrail" in yaml_data:
+        overrides["guardrail"] = GuardrailConfig(**yaml_data["guardrail"])
+    if "tracing" in yaml_data:
+        overrides["tracing"] = TracingConfig(**yaml_data["tracing"])
     if "app" in yaml_data:
         overrides["app"] = AppConfig(**yaml_data["app"])
 

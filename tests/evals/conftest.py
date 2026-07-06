@@ -33,6 +33,15 @@ def _set_env_defaults(monkeypatch):
         monkeypatch.setenv(key, os.environ.get(key, default))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _init_tracing():
+    """Initialise Phoenix tracing once per eval session (no-op unless configured)."""
+    from src.core.tracing import setup_tracing
+
+    setup_tracing()
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _clear_caches():
     """Clear LRU caches between tests."""

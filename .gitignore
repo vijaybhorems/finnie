@@ -13,3 +13,6 @@ make_proposals_prompt.md
 plan_prompt.md
 research_prompt.md
 review_prompt.md
+.DS_Store
+plans/
+research/

@@ -16,6 +16,7 @@ bootstrap_auth_secrets()
 
 import streamlit as st
 
+from src.core.tracing import setup_tracing
 from src.utils.logger import get_logger, setup_logging
 from src.web_app.auth import (
     is_user_authorized,
@@ -25,6 +26,9 @@ from src.web_app.auth import (
 )
 
 setup_logging()
+# Must run before any LangChain/LangGraph import (page modules below) so the
+# OpenInference instrumentor can patch them.
+setup_tracing()
 logger = get_logger(__name__)
 
 # ── Page config (must be first Streamlit call) ────────────────────────────────

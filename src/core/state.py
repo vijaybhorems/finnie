@@ -17,6 +17,7 @@ class AgentType(str, Enum):
     NEWS_SYNTHESIZER = "news_synthesizer"
     TAX_EDUCATION = "tax_education"
     ROUTER = "router"
+    OUT_OF_SCOPE = "out_of_scope"
 
 
 class UserProfile(BaseModel):
@@ -48,6 +49,9 @@ class FinnieState(BaseModel):
     current_agent: AgentType = AgentType.ROUTER
     next_agent: Optional[AgentType] = None
     router_reasoning: str = ""
+
+    # Guardrail verdict (set by guardrail_node; None until evaluated)
+    is_on_topic: Optional[bool] = None
 
     # User context
     user_profile: UserProfile = Field(default_factory=UserProfile)

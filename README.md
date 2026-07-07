@@ -10,22 +10,27 @@ Try it out: https://finnie-app-eycr2lj5ga-uc.a.run.app/
 User Query
     │
     ▼
-┌─────────────────────────────────────────────────────────┐
-│  LangGraph Workflow                                      │
-│                                                          │
-│  ┌──────────┐    ┌──────────────────────────────────┐  │
-│  │  Router  │───▶│  Specialized Agent (one of 6)    │  │
-│  │  Node    │    │                                  │  │
-│  └──────────┘    │  ┌──────────┐  ┌─────────────┐  │  │
-│                  │  │   RAG    │  │  Data APIs  │  │  │
-│                  │  │ (FAISS)  │  │ (yF/AV/FRED)│  │  │
-│                  │  └──────────┘  └─────────────┘  │  │
-│                  └──────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│  LangGraph Workflow                                                │
+│                                                                    │
+│  ┌────────────┐    ┌──────────┐    ┌──────────────────────────┐  │
+│  │ Guardrail  │───▶│  Router  │───▶│ Specialized Agent (1/6)  │  │
+│  │ (finance/  │    │  Node    │    │                          │  │
+│  │  NSFW gate)│    │          │    │ ┌──────────┐ ┌─────────┐ │  │
+│  └─────┬──────┘    └──────────┘    │ │   RAG    │ │Data APIs│ │  │
+│        │ rejected                  │ │ (FAISS)  │ │(yF/AV/  │ │  │
+│        ▼                           │ └──────────┘ │FRED, w/ │ │  │
+│      END (canned refusal)          │              │ circuit │ │  │
+│                                     │              │ breaker)│ │  │
+│                                     │              └─────────┘ │  │
+│                                     └──────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────┘
     │
     ▼
 Streamlit UI (4 tabs: Chat / Portfolio / Market / Goals)
 ```
+
+The guardrail is a fail-closed gate: it runs before the router on every turn, blocklist-rejects obvious NSFW/unsafe terms without an LLM call, then uses an LLM classifier for finance-scope. Any classifier error or ambiguous output also rejects — a broken guardrail can only make Finnie more restrictive, never bypass safety (`src/workflow/guardrail.py`). Each external data client (yFinance, Alpha Vantage, FRED, NewsAPI) is wrapped in its own per-provider circuit breaker (`src/utils/circuit_breaker.py`) that opens after repeated failures and self-tests via a half-open probe before closing again.
 
 ### Six Specialized Agents
 
@@ -50,6 +55,8 @@ Streamlit UI (4 tabs: Chat / Portfolio / Market / Goals)
 | Macro Data | FRED API |
 | News | NewsAPI + RSS Feeds |
 | UI | Streamlit |
+| Safety Gate | LLM-based guardrail (finance/NSFW scope check, fails closed) |
+| Resilience | Per-provider circuit breaker around each data client |
 | Tracing/Observability | Arize Phoenix + OpenInference |
 | Deployment | Docker Compose / Google Cloud Run |
 
@@ -153,33 +160,42 @@ finnie/
 │   │   ├── goal_planning_agent.py
 │   │   ├── news_synthesizer_agent.py
 │   │   └── tax_education_agent.py
-│   ├── core/                # Config, LLM factory, LangGraph state
+│   ├── core/                # Config, LLM factory, LangGraph state, tracing
 │   │   ├── config.py
 │   │   ├── llm.py
-│   │   └── state.py
+│   │   ├── state.py
+│   │   └── tracing.py
 │   ├── data/                # API clients + knowledge base
 │   │   ├── yfinance_client.py
 │   │   ├── alpha_vantage_client.py
 │   │   ├── fred_client.py
 │   │   ├── news_client.py
-│   │   └── knowledge_base/  # 10+ curated financial articles
+│   │   └── knowledge_base/  # 12 curated financial articles across 6 categories
 │   ├── rag/                 # FAISS indexer + retriever
 │   │   ├── indexer.py
 │   │   └── retriever.py
-│   ├── web_app/             # Streamlit UI (4 tabs)
+│   ├── web_app/             # Streamlit UI (4 tabs) + Google OAuth
 │   │   ├── app.py
+│   │   ├── auth.py
+│   │   ├── auth_bootstrap.py
 │   │   └── pages/
 │   │       ├── chat.py
 │   │       ├── portfolio.py
 │   │       ├── market.py
 │   │       └── goals.py
-│   ├── utils/               # Logging, Redis cache
+│   ├── utils/               # Logging, Redis cache, circuit breaker
 │   │   ├── cache.py
+│   │   ├── circuit_breaker.py
 │   │   └── logger.py
-│   └── workflow/            # LangGraph graph + router
+│   └── workflow/            # LangGraph graph + guardrail + router
 │       ├── graph.py
+│       ├── guardrail.py
 │       └── router.py
-├── tests/                   # pytest test suite
+├── tests/                   # pytest unit/integration suite
+│   └── evals/               # LLM-as-judge + Phoenix evals (run on demand, not in CI)
+├── scripts/
+│   ├── build_rag_index.py
+│   └── run_phoenix_evals.py # routing accuracy + answer-quality evals
 ├── docker/                  # Dockerfile
 ├── docker-compose.yml
 ├── config.yaml
@@ -201,6 +217,22 @@ pytest tests/test_agents.py -v
 
 # Run without coverage (faster)
 pytest --no-cov
+```
+
+### Evals (`tests/evals/`)
+
+A separate suite covering RAG retrieval quality, router accuracy, guardrail behavior, resilience (circuit breaker), and disclaimer/answer-quality checks. These build a real FAISS index from the knowledge base and some cases call the live Anthropic API — run them on demand rather than in CI:
+
+```bash
+pytest tests/evals -v
+```
+
+For LLM-as-judge routing accuracy and prompt/answer-quality reports (optionally traced to Phoenix), use the standalone script instead:
+
+```bash
+python scripts/run_phoenix_evals.py --routing   # router accuracy over labelled cases
+python scripts/run_phoenix_evals.py --quality   # LLM-judge answer quality (requires arize-phoenix)
+python scripts/run_phoenix_evals.py --all
 ```
 
 ## API Documentation
@@ -263,6 +295,23 @@ Categories: `investing_basics`, `portfolio_management`, `market_concepts`, `tax_
 - **RAG index**: Built once at startup, loaded into memory for fast retrieval (~50ms per query)
 - **Redis**: Significantly improves response times for repeated queries; app falls back to in-memory cache if Redis unavailable
 
+## Safety Gate & Resilience
+
+Both are tuned in `config.yaml`:
+
+```yaml
+guardrail:
+  enabled: true  # pre-router finance/NSFW gate; fails closed on classifier error
+
+circuit_breaker:
+  failure_threshold: 5        # consecutive failures before a provider's breaker opens
+  recovery_timeout_seconds: 60 # time before an open breaker allows a half-open probe
+  success_threshold: 1         # successful probes needed to close the breaker again
+```
+
+- **Guardrail** (`src/workflow/guardrail.py`): runs before the router on every turn. A fast blocklist check catches obvious NSFW/unsafe terms without an LLM call; everything else goes through an LLM topic classifier. Any error, malformed output, or off-topic verdict short-circuits the graph straight to `END` with a canned refusal — the router and agents never see a rejected query.
+- **Circuit breaker** (`src/utils/circuit_breaker.py`): one breaker per data provider (yFinance, Alpha Vantage, FRED, NewsAPI). Opens after `failure_threshold` consecutive failures, stays open for `recovery_timeout_seconds`, then allows a single half-open probe request before closing again.
+
 ## Observability — Arize Phoenix Tracing
 
 Tracing is off by default and never required for the app to run (`setup_tracing()` in `src/core/tracing.py` is a no-op unless explicitly enabled) — it instruments LangChain/LangGraph via OpenInference and exports spans (router decisions, guardrail checks, and every LLM call with full prompt/response content) to an Arize Phoenix collector.
@@ -318,7 +367,7 @@ Cloud Run reaches private resources (e.g. a Memorystore Redis instance, as in `e
 |----------|---------------|
 | Multi-Agent Architecture (10%) | 6 agents with BaseAgent, clean separation |
 | LangGraph Workflow (10%) | StateGraph with conditional routing |
-| RAG Implementation (8%) | FAISS + sentence-transformers, 10 KB articles |
+| RAG Implementation (8%) | FAISS + sentence-transformers, 12 KB articles |
 | Real-time Data Integration (7%) | yFinance + AV + FRED + NewsAPI with error handling |
 | Streamlit Application (10%) | 4-tab UI: Chat, Portfolio, Market, Goals |
 | Conversational Flow (8%) | LangGraph state, message history across turns |

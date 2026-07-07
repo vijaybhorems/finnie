@@ -1,0 +1,14 @@
+# Cloud Build config for the Finnie Streamlit app.
+# The Dockerfile lives in docker/ but its build context is the repo root,
+# so we build with `-f docker/Dockerfile .`.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest
+      - -f
+      - docker/Dockerfile
+      - .
+images:
+  - us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest

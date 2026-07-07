@@ -56,6 +56,26 @@ class TestFinanceQAAgent:
 
         assert "educational" in result["final_response"].lower() or "disclaimer" in result["final_response"].lower() or "not financial advice" in result["final_response"].lower()
 
+    @patch("src.agents.finance_qa_agent.get_retriever")
+    @patch("src.agents.finance_qa_agent.FredClient")
+    @patch("src.agents.base_agent.get_llm")
+    def test_build_prompt_escapes_braces_in_dynamic_content(self, mock_llm, mock_fred, mock_retriever):
+        """Regression: dynamic content with literal { } (e.g. a JSON snippet from a
+        knowledge base article) must be escaped so ChatPromptTemplate does not parse
+        it as template variables. Rendered directly via _build_prompt to isolate the
+        exact layer that raised "missing variables {'fed_funds_rate'}" in production."""
+        from src.agents.finance_qa_agent import FinanceQAAgent
+        agent = FinanceQAAgent()
+
+        additional = 'MACRO SNAPSHOT:\n{\n  "fed_funds_rate": 5.33,\n  "cpi": 3.1\n}'
+        prompt = agent._build_prompt(additional)
+
+        # Before the fix, this invoke raised because the braces were treated as
+        # undeclared template variables. It must now render as literal text.
+        rendered = prompt.invoke({"messages": [HumanMessage(content="hi")]}).to_string()
+        assert "fed_funds_rate" in rendered
+        assert "hi" in rendered
+
 
 class TestPortfolioAgent:
     @patch("src.agents.portfolio_agent.AlphaVantageClient")

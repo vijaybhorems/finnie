@@ -14,6 +14,22 @@ logger = get_logger(__name__)
 
 _BREAKER_NAME = "yfinance"
 
+# SPDR sector ETFs — used to derive sector performance since Alpha Vantage's
+# free SECTOR endpoint was deprecated (it now returns an empty payload).
+_SECTOR_ETFS = {
+    "Technology": "XLK",
+    "Financials": "XLF",
+    "Health Care": "XLV",
+    "Energy": "XLE",
+    "Consumer Discretionary": "XLY",
+    "Consumer Staples": "XLP",
+    "Industrials": "XLI",
+    "Materials": "XLB",
+    "Utilities": "XLU",
+    "Real Estate": "XLRE",
+    "Communication Services": "XLC",
+}
+
 
 class YFinanceClient:
     """Wraps yfinance with Redis caching and error handling."""
@@ -66,6 +82,32 @@ class YFinanceClient:
             breaker.record_failure()
             logger.error("yfinance_price_error", ticker=ticker, error=str(exc))
             return self._stale_or(key, {"ticker": ticker, "error": str(exc)})
+
+    def get_sector_performance(self) -> dict[str, Any]:
+        """US sector performance (1-day % change) derived from SPDR sector ETFs.
+
+        Alpha Vantage's free ``SECTOR`` endpoint was deprecated (it now returns an
+        empty payload), so sector moves are computed from the SPDR sector ETFs via
+        yfinance. The return shape mirrors the previous provider so callers are
+        unchanged: ``{"one_day": {sector_name: "+x.xx%"}}`` (or ``{"error": ...}``).
+        """
+        key = self._cache.cache_key("yf", "sectors")
+        cached = self._cache.get(key)
+        if cached:
+            return cached
+
+        one_day: dict[str, str] = {}
+        for sector, etf in _SECTOR_ETFS.items():
+            change_pct = self.get_current_price(etf).get("change_pct")
+            if change_pct is not None:
+                one_day[sector] = f"{change_pct:+.2f}%"
+
+        if not one_day:
+            return self._stale_or(key, {"error": "Sector data unavailable"})
+
+        result = {"one_day": one_day}
+        self._cache.set(key, result, ttl=1800)  # 30-min cache
+        return result
 
     def get_historical_prices(
         self,

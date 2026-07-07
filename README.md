@@ -50,7 +50,8 @@ Streamlit UI (4 tabs: Chat / Portfolio / Market / Goals)
 | Macro Data | FRED API |
 | News | NewsAPI + RSS Feeds |
 | UI | Streamlit |
-| Deployment | Docker Compose |
+| Tracing/Observability | Arize Phoenix + OpenInference |
+| Deployment | Docker Compose / Google Cloud Run |
 
 ## Setup Instructions
 
@@ -76,6 +77,15 @@ NEWS_API_KEY=...                   # Optional — enables news headlines
 - Alpha Vantage: https://www.alphavantage.co/support/#api-key (free tier: 25 req/day)
 - FRED: https://fred.stlouisfed.org/docs/api/api_key.html (free, unlimited)
 - NewsAPI: https://newsapi.org/register (free tier: 100 req/day)
+
+**Google sign-in (required to load the app at all — there is no local-dev bypass):**
+
+The app gates every page behind Google OAuth (`src/web_app/auth.py`). Without valid credentials configured, `st.user.is_logged_in` raises an error and the app won't render, even locally. Create a Google OAuth client at the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (type "Web application", redirect URI `http://localhost:8501/oauth2callback` for local dev), then either:
+
+- Add the values to `.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_REDIRECT_URI`, `AUTH_COOKIE_SECRET` — generate the cookie secret with `python -c "import secrets; print(secrets.token_hex(32))"`), **or**
+- Create `.streamlit/secrets.toml` directly from `.streamlit/secrets.toml.example` (this is what `auth_bootstrap.py` does automatically in production when `GOOGLE_CLIENT_ID` is set as an env var — see `src/web_app/auth_bootstrap.py`).
+
+Leave `ALLOWED_EMAILS` empty to allow any authenticated Google account, or set a comma-separated allowlist to restrict access.
 
 ### 2. Option A: Docker Compose (recommended)
 
@@ -252,6 +262,55 @@ Categories: `investing_basics`, `portfolio_management`, `market_concepts`, `tax_
 - **Rate limits**: Alpha Vantage free tier = 5 calls/minute. Client enforces 12s delays between calls.
 - **RAG index**: Built once at startup, loaded into memory for fast retrieval (~50ms per query)
 - **Redis**: Significantly improves response times for repeated queries; app falls back to in-memory cache if Redis unavailable
+
+## Observability — Arize Phoenix Tracing
+
+Tracing is off by default and never required for the app to run (`setup_tracing()` in `src/core/tracing.py` is a no-op unless explicitly enabled) — it instruments LangChain/LangGraph via OpenInference and exports spans (router decisions, guardrail checks, and every LLM call with full prompt/response content) to an Arize Phoenix collector.
+
+**Local dev — self-hosted Phoenix:**
+
+```bash
+phoenix serve   # starts UI at http://localhost:6006, OTLP gRPC receiver at :4317
+```
+
+Then in `config.yaml`:
+
+```yaml
+tracing:
+  enabled: true
+  project_name: "finnie"
+  endpoint: "http://localhost:4317"
+```
+
+**Production / Cloud Run — Phoenix Cloud:** sign up at [app.phoenix.arize.com](https://app.phoenix.arize.com), create a space, and generate an API key from that same UI (not `app.arize.com/account/api-keys` — that's a different product). Rather than editing `config.yaml`, set these as env vars (e.g. Cloud Run `--update-env-vars` / `--update-secrets`) so tracing can be toggled per-deployment without a rebuild:
+
+```env
+TRACING_ENABLED=true
+PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/s/your-space
+PHOENIX_API_KEY=...      # store as a Secret Manager secret, not a plain env var
+```
+
+The exporter protocol is inferred automatically: `https://` endpoints use OTLP over HTTP (required for Cloud Run, which only accepts HTTPS ingress), `http://host:port` endpoints use gRPC (for local dev). Spans typically show up in the Phoenix UI within a few seconds.
+
+## Deploying to Google Cloud Run
+
+The included `docker/Dockerfile` builds directly for Cloud Run. General flow (see your specific service's current config first with `gcloud run services describe SERVICE --region=REGION --format=yaml` — image path, service account, and VPC connector for Redis all vary per deployment):
+
+```bash
+# Build & push (reuses the existing Artifact Registry repo — read the exact
+# path from the describe output above rather than inventing a new one)
+gcloud builds submit --tag REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/finnie-app:latest .
+
+# Deploy a new revision — use --update-* (merge) not --set-* (replace-all),
+# so you don't wipe out existing env vars/secrets/VPC config
+gcloud run deploy SERVICE_NAME \
+  --image=REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/finnie-app:latest \
+  --region=REGION \
+  --update-env-vars=TRACING_ENABLED=true,PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/s/your-space \
+  --update-secrets=PHOENIX_API_KEY=phoenix-api-key:latest
+```
+
+Cloud Run reaches private resources (e.g. a Memorystore Redis instance, as in `env-vars.yaml`) only via a [Serverless VPC Access connector](https://cloud.google.com/run/docs/configuring/vpc-connectors) — confirm one is attached (`vpcAccess` in the `describe` output) before assuming `REDIS_HOST` will be reachable.
 
 ## Evaluation Criteria Coverage
 

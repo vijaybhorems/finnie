@@ -82,7 +82,7 @@ guardrail:
 tracing:
   enabled: false  # Arize Phoenix; enable and set endpoint to export spans
   project_name: "finnie"
-  endpoint: ""  # e.g. http://localhost:4317
+  endpoint: ""  # e.g. http://localhost:4317 (local/gRPC) or https://app.phoenix.arize.com/s/<space> (Phoenix Cloud/HTTP)
 
 ui:
   port: 8501

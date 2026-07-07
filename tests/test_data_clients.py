@@ -139,6 +139,40 @@ class TestYFinanceClient:
         assert result["total_value"] == 0.0
         assert result["holdings"] == []
 
+    @patch("src.data.yfinance_client.get_cache")
+    def test_get_sector_performance_from_etfs(self, mock_cache):
+        mock_cache.return_value = MagicMock(
+            get=MagicMock(return_value=None),
+            set=MagicMock(),
+            cache_key=MagicMock(return_value="finnie:yf:sectors"),
+        )
+
+        from src.data.yfinance_client import YFinanceClient
+        client = YFinanceClient()
+        # Stub per-ETF price lookups with a deterministic change_pct.
+        with patch.object(YFinanceClient, "get_current_price", return_value={"change_pct": 1.25}):
+            result = client.get_sector_performance()
+
+        assert "error" not in result
+        assert len(result["one_day"]) == 11
+        assert result["one_day"]["Technology"] == "+1.25%"
+
+    @patch("src.data.yfinance_client.get_cache")
+    def test_get_sector_performance_all_missing_returns_error(self, mock_cache):
+        mock_cache.return_value = MagicMock(
+            get=MagicMock(return_value=None),
+            get_stale=MagicMock(return_value=None),
+            set=MagicMock(),
+            cache_key=MagicMock(return_value="finnie:yf:sectors"),
+        )
+
+        from src.data.yfinance_client import YFinanceClient
+        client = YFinanceClient()
+        with patch.object(YFinanceClient, "get_current_price", return_value={"change_pct": None}):
+            result = client.get_sector_performance()
+
+        assert result["error"] == "Sector data unavailable"
+
 
 class TestFredClient:
     @patch("src.data.fred_client.requests")

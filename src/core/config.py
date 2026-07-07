@@ -104,7 +104,10 @@ class TracingConfig(BaseModel):
     """Arize Phoenix / OpenInference tracing configuration."""
     enabled: bool = False
     project_name: str = "finnie"
-    endpoint: str = ""  # e.g. http://localhost:4317 ; empty -> tracing stays disabled
+    endpoint: str = ""  # e.g. http://localhost:4317 (local, gRPC) or
+                         # https://app.phoenix.arize.com/s/<space> (Phoenix Cloud, HTTP)
+    protocol: str = ""  # "grpc" | "http/protobuf" ; empty -> inferred from endpoint
+    api_key: str = ""   # Phoenix Cloud API key (from app.phoenix.arize.com, not Arize AX)
 
 
 class AppConfig(BaseModel):
@@ -124,6 +127,13 @@ class Settings(BaseSettings):
     redis_port: int = Field(default=6379, env="REDIS_PORT")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     debug: bool = Field(default=False, env="DEBUG")
+    # NOTE: pydantic-settings v2 ignores Field(env=...) (silently a no-op — it's a
+    # pydantic v1 kwarg). The fields above this comment only work by coincidence
+    # because their auto-derived env var name (uppercased field name) already
+    # matches. These two use validation_alias since PHOENIX_COLLECTOR_ENDPOINT
+    # doesn't match the field name.
+    phoenix_api_key: str = Field(default="", validation_alias="PHOENIX_API_KEY")
+    phoenix_endpoint: str = Field(default="", validation_alias="PHOENIX_COLLECTOR_ENDPOINT")
 
     # Nested config (from YAML)
     app: AppConfig = AppConfig()
@@ -191,5 +201,17 @@ def get_settings() -> Settings:
     # Redis host/port from env take precedence
     settings.redis.host = settings.redis_host
     settings.redis.port = settings.redis_port
+
+    # Phoenix API key / endpoint from env take precedence (keeps secrets out of config.yaml)
+    if settings.phoenix_api_key:
+        settings.tracing.api_key = settings.phoenix_api_key
+    if settings.phoenix_endpoint:
+        settings.tracing.endpoint = settings.phoenix_endpoint
+
+    # Optional env override to flip tracing on/off without editing config.yaml or
+    # rebuilding the image (handy for toggling per Cloud Run deployment/revision).
+    tracing_enabled_raw = os.environ.get("TRACING_ENABLED")
+    if tracing_enabled_raw is not None:
+        settings.tracing.enabled = tracing_enabled_raw.strip().lower() in ("1", "true", "yes")
 
     return settings

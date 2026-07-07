@@ -47,7 +47,7 @@ class MarketAnalysisAgent(BaseAgent):
         # Sector performance
         sector_data = {}
         try:
-            sector_data = self._av.get_sector_performance()
+            sector_data = self._yf.get_sector_performance()
         except Exception as exc:
             self._logger.warning("sector_data_error", error=str(exc))
 

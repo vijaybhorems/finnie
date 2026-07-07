@@ -44,17 +44,39 @@ def setup_tracing() -> bool:
     try:
         from phoenix.otel import register
 
-        register(
+        # Protocol: explicit config wins; otherwise infer from the endpoint so both
+        # local dev (gRPC collector on :4317) and Phoenix Cloud / any HTTPS-fronted
+        # collector (OTLP over HTTP, e.g. Cloud Run) work without extra config.
+        protocol = tracing.protocol or (
+            "http/protobuf" if tracing.endpoint.startswith("https://") else "grpc"
+        )
+
+        # register(endpoint=...) expects a fully-qualified OTLP URL and uses it
+        # verbatim (unlike the PHOENIX_COLLECTOR_ENDPOINT env var, which Phoenix
+        # normalizes). For HTTP we must append the /v1/traces path ourselves or
+        # spans POST to the space root and fail with 405 Method Not Allowed.
+        endpoint = tracing.endpoint
+        if protocol == "http/protobuf" and not endpoint.rstrip("/").endswith("/v1/traces"):
+            endpoint = endpoint.rstrip("/") + "/v1/traces"
+
+        register_kwargs: dict = dict(
             project_name=tracing.project_name,
-            endpoint=tracing.endpoint,
+            endpoint=endpoint,
+            protocol=protocol,
             auto_instrument=True,  # picks up installed OpenInference instrumentors
             batch=True,            # batched export for production
         )
+        if tracing.api_key:
+            register_kwargs["api_key"] = tracing.api_key
+
+        register(**register_kwargs)
         _TRACING_INITIALISED = True
         logger.info(
             "tracing_enabled",
             project_name=tracing.project_name,
-            endpoint=tracing.endpoint,
+            endpoint=endpoint,
+            protocol=protocol,
+            has_api_key=bool(tracing.api_key),
         )
         return True
     except Exception as exc:  # noqa: BLE001 — tracing must never break the app

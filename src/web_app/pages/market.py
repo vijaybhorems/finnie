@@ -6,7 +6,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.data.alpha_vantage_client import AlphaVantageClient
 from src.data.yfinance_client import YFinanceClient
 from src.workflow.graph import run_workflow
 
@@ -36,7 +35,6 @@ def render_market_page() -> None:
 
 def _render_market_snapshot() -> None:
     yf_client = YFinanceClient()
-    av_client = AlphaVantageClient()
 
     st.subheader("Major Indices")
     with st.spinner("Loading market data..."):
@@ -58,7 +56,7 @@ def _render_market_snapshot() -> None:
     # Sector performance heatmap
     st.subheader("Sector Performance (1-Day)")
     with st.spinner("Loading sector data..."):
-        sector_data = av_client.get_sector_performance()
+        sector_data = yf_client.get_sector_performance()
         if sector_data and "error" not in sector_data:
             one_day = sector_data.get("one_day", {})
             if one_day:
@@ -84,7 +82,7 @@ def _render_market_snapshot() -> None:
                 )
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Sector data requires an Alpha Vantage API key. Configure it in .env to see sector heatmaps.")
+            st.info("Sector performance is temporarily unavailable — try refreshing in a moment.")
 
     # Watchlist
     st.subheader("Custom Watchlist")

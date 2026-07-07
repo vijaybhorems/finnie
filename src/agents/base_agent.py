@@ -52,6 +52,13 @@ class BaseAgent(ABC):
         system = self.system_prompt
         if additional_system:
             system = f"{system}\n\n{additional_system}"
+        # The system text embeds dynamic content (RAG context, live macro data,
+        # user profile) that can contain literal { } — e.g. JSON snippets from
+        # knowledge base articles. With the default f-string template format
+        # those braces are parsed as prompt variables and raise "missing
+        # variables". Escape them so the system text is treated literally. The
+        # {messages} placeholder below is a separate message tuple, unaffected.
+        system = system.replace("{", "{{").replace("}", "}}")
         return ChatPromptTemplate.from_messages([
             ("system", system),
             ("placeholder", "{messages}"),

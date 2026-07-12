@@ -6,6 +6,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.agents.goal_planning_agent import _project_savings, _RETURN_ASSUMPTIONS
+from src.core.config import get_settings
+from src.planning.life_events import EVENT_TYPES, LifeEvent
+from src.planning.projection_engine import ProjectionInputs, project_timeline, summarize
 from src.workflow.graph import run_workflow
 
 
@@ -13,13 +16,20 @@ def render_goals_page() -> None:
     st.title("🎯 Financial Goal Planner")
     st.caption("Set goals, run projections, and get AI-powered planning guidance")
 
-    tab1, tab2, tab3 = st.tabs(["🧮 Projection Calculator", "🤖 AI Goal Planner", "💰 Retirement Calculator"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🧮 Projection Calculator",
+        "🗓️ Life Timeline",
+        "🤖 AI Goal Planner",
+        "💰 Retirement Calculator",
+    ])
 
     with tab1:
         _render_projection_calculator()
     with tab2:
-        _render_ai_goal_planner()
+        _render_life_timeline()
     with tab3:
+        _render_ai_goal_planner()
+    with tab4:
         _render_retirement_calculator()
 
 
@@ -90,6 +100,233 @@ def _render_projection_calculator() -> None:
                 st.success(f"At {annual_return*100:.1f}% annual return, you'll reach ${target_amount:,.0f} in approximately **{ytg:.1f} years**.")
             else:
                 st.warning("Cannot reach target with current contribution rate. Increase monthly savings or adjust the target.")
+
+
+# ── Life Timeline (deterministic life-event projection) ───────────────────────
+
+# Per-event-kind input specs: field name -> (widget label, default, step).
+_EVENT_FIELDS: dict[str, list[tuple[str, str, float, float]]] = {
+    "inheritance": [("amount", "Amount ($)", 50_000, 5_000)],
+    "home_purchase": [
+        ("price", "Home price ($)", 400_000, 10_000),
+        ("down_payment", "Down payment ($)", 80_000, 5_000),
+        ("mortgage_rate", "Mortgage rate (%)", 6.0, 0.1),
+        ("term_years", "Term (years)", 30, 1),
+    ],
+    "child_birth": [
+        ("annual_cost", "Annual cost ($)", 15_000, 1_000),
+        ("dependent_years", "Dependent years", 18, 1),
+        ("college_start_offset", "College start (yrs from now, 0=none)", 0, 1),
+        ("college_cost", "College annual cost ($)", 30_000, 5_000),
+        ("college_years", "College years", 4, 1),
+    ],
+    "college_funding": [
+        ("annual_cost", "Annual cost ($)", 30_000, 5_000),
+        ("years", "Years", 4, 1),
+    ],
+    "job_change": [("annual_income_delta", "Annual income change ($, +/-)", 15_000, 1_000)],
+    "retirement_start": [
+        ("annual_retirement_spend", "Annual retirement spend ($)", 60_000, 5_000),
+        ("social_security", "Annual Social Security ($)", 20_000, 1_000),
+    ],
+}
+
+_EVENT_LABELS = {
+    "inheritance": "Inheritance / windfall",
+    "home_purchase": "Home purchase",
+    "child_birth": "Child",
+    "college_funding": "College funding",
+    "job_change": "Job / income change",
+    "retirement_start": "Retirement",
+}
+
+
+def _resolve_inflation(default_inflation: float) -> float:
+    """Best-effort live inflation from FRED 5yr expectations; fall back to default."""
+    try:
+        from src.data.fred_client import FRED_SERIES, FredClient
+
+        latest = FredClient().get_series_latest(FRED_SERIES["inflation_expectations"])
+        value = latest.get("value")
+        if value not in (None, ".", ""):
+            return float(value) / 100.0
+    except Exception:  # noqa: BLE001 — inflation is optional; keep the UI resilient
+        pass
+    return default_inflation
+
+
+def _build_events(raw_events: list[dict]) -> list[LifeEvent]:
+    """Instantiate LifeEvent objects from stored UI dicts, skipping invalid ones."""
+    events: list[LifeEvent] = []
+    for raw in raw_events:
+        kind = raw["kind"]
+        cls = EVENT_TYPES[kind]
+        params = {k: v for k, v in raw.items() if k != "kind"}
+        # child_birth: 0 college_start_offset means "no college block".
+        if kind == "child_birth" and not params.get("college_start_offset"):
+            params.pop("college_start_offset", None)
+            params.pop("college_cost", None)
+        events.append(cls(**params))
+    return events
+
+
+def _render_life_timeline() -> None:
+    st.subheader("Life-Event Timeline Projection")
+    st.caption("Compose major life events and see how they reshape your net worth over time")
+
+    settings = get_settings()
+    if "timeline_events" not in st.session_state:
+        st.session_state.timeline_events = []
+
+    # ── Baseline inputs ──
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        start_age = st.number_input("Current Age", min_value=18, max_value=90, value=30, key="tl_age")
+        horizon = st.slider(
+            "Horizon (Years)", min_value=1, max_value=settings.planning.max_horizon_years, value=30, key="tl_horizon"
+        )
+    with col2:
+        current_savings = st.number_input("Current Savings ($)", min_value=0, value=25_000, step=5_000, key="tl_savings")
+        monthly_contribution = st.number_input("Monthly Contribution ($)", min_value=0, value=1_000, step=100, key="tl_contrib")
+    with col3:
+        risk_tolerance = st.selectbox(
+            "Risk Tolerance", ["conservative", "moderate", "aggressive"], index=1, key="tl_risk"
+        )
+        annual_return = _RETURN_ASSUMPTIONS[risk_tolerance]
+        view_real = st.toggle("Inflation-adjusted (real $)", value=False, key="tl_real")
+        st.caption(f"Assumed return: {annual_return*100:.1f}%")
+
+    # ── Event builder ──
+    st.markdown("**Add a life event**")
+    ecol1, ecol2 = st.columns([1, 3])
+    with ecol1:
+        kind = st.selectbox(
+            "Event type",
+            list(_EVENT_FIELDS.keys()),
+            format_func=lambda k: _EVENT_LABELS.get(k, k),
+            key="tl_kind",
+        )
+    with ecol2:
+        year_offset = st.slider("Years from now", min_value=0, max_value=int(horizon), value=1, key="tl_offset")
+
+    new_params: dict = {}
+    field_cols = st.columns(len(_EVENT_FIELDS[kind]))
+    for (field_name, label, default, step), fcol in zip(_EVENT_FIELDS[kind], field_cols):
+        new_params[field_name] = fcol.number_input(
+            label, value=default, step=step, key=f"tl_field_{kind}_{field_name}"
+        )
+
+    if st.button("➕ Add event", key="tl_add"):
+        if len(st.session_state.timeline_events) >= settings.planning.max_events:
+            st.warning(f"Event limit reached ({settings.planning.max_events}).")
+        else:
+            entry = {"kind": kind, "year_offset": int(year_offset), "label": _EVENT_LABELS.get(kind, kind)}
+            for field_name, _, _, _ in _EVENT_FIELDS[kind]:
+                val = new_params[field_name]
+                # Rate field is entered as a percent; convert to a fraction.
+                entry[field_name] = val / 100.0 if field_name == "mortgage_rate" else val
+            st.session_state.timeline_events.append(entry)
+            st.rerun()
+
+    # ── Current timeline (sorted by year) ──
+    events_raw = sorted(st.session_state.timeline_events, key=lambda e: e["year_offset"])
+    if events_raw:
+        st.markdown("**Your timeline**")
+        for i, evt in enumerate(events_raw):
+            c1, c2 = st.columns([6, 1])
+            c1.write(f"• Year +{evt['year_offset']} (age {start_age + evt['year_offset']}): {evt['label']}")
+            if c2.button("🗑️", key=f"tl_del_{i}"):
+                st.session_state.timeline_events.remove(evt)
+                st.rerun()
+        if st.button("Clear all events", key="tl_clear"):
+            st.session_state.timeline_events = []
+            st.rerun()
+
+    if not st.button("📈 Run Timeline Projection", type="primary", key="tl_run"):
+        return
+
+    # ── Run projection ──
+    inflation = _resolve_inflation(settings.planning.default_inflation)
+    inputs = ProjectionInputs(
+        start_age=int(start_age),
+        horizon_years=int(horizon),
+        current_savings=float(current_savings),
+        monthly_contribution=float(monthly_contribution),
+        annual_return=annual_return,
+        annual_inflation=inflation,
+    )
+    try:
+        events = _build_events(events_raw)
+    except Exception as exc:  # noqa: BLE001 — surface bad inputs to the user
+        st.error(f"Could not build the timeline: {exc}")
+        return
+
+    baseline = project_timeline(inputs, [])
+    scenario = project_timeline(inputs, events)
+    summary = summarize(scenario, annual_inflation=inflation)
+
+    def _series(results: list) -> list[float]:
+        if not view_real:
+            return [r.net_worth for r in results]
+        return [r.net_worth / ((1 + inflation) ** r.year) for r in results]
+
+    ages = [r.age for r in scenario]
+
+    unit = "real $" if view_real else "nominal $"
+    m1, m2, m3 = st.columns(3)
+    ending = summary["ending_net_worth_real"] if view_real else summary["ending_net_worth"]
+    m1.metric(f"Ending Net Worth ({unit})", f"${ending:,.0f}")
+    m2.metric("Total Contributed", f"${summary['total_contributed']:,.0f}")
+    m3.metric("Investment Growth", f"${summary['investment_growth']:,.0f}")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=ages, y=_series(baseline), name="Baseline (no events)", line=dict(color="#78909C", dash="dot")))
+    fig.add_trace(go.Scatter(x=ages, y=_series(scenario), name="With life events", line=dict(color="#2196F3"), fill="tozeroy", fillcolor="rgba(33, 150, 243, 0.08)"))
+    for evt in events_raw:
+        fig.add_vline(x=start_age + evt["year_offset"], line_dash="dash", line_color="rgba(244, 67, 54, 0.4)", annotation_text=evt["label"], annotation_textangle=-90)
+    fig.update_layout(
+        title=f"Net Worth Over Time ({unit})",
+        xaxis_title="Age",
+        yaxis_title=f"Net Worth ({unit})",
+        hovermode="x unified",
+        height=420,
+        yaxis=dict(tickprefix="$", tickformat=",.0f"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    if summary["milestones"]:
+        st.markdown("**Milestones**")
+        milestone_df = pd.DataFrame([
+            {
+                "Year": m["year"],
+                "Age": m["age"],
+                "Event(s)": ", ".join(m["events"]),
+                "Net Worth": f"${m['net_worth']:,.0f}",
+            }
+            for m in summary["milestones"]
+        ])
+        st.dataframe(milestone_df, use_container_width=True, hide_index=True)
+
+    # ── Optional AI narration (reuses GoalPlanningAgent via the workflow) ──
+    if st.button("🤖 Explain this projection", key="tl_explain"):
+        event_lines = "; ".join(
+            f"{e['label']} at age {start_age + e['year_offset']}" for e in events_raw
+        ) or "no specific events"
+        summary_msg = (
+            f"I modeled a financial timeline from age {start_age} over {horizon} years "
+            f"with these life events: {event_lines}. Starting savings ${current_savings:,.0f}, "
+            f"monthly contribution ${monthly_contribution:,.0f}, {risk_tolerance} risk "
+            f"({annual_return*100:.1f}% return). Projected ending net worth is "
+            f"${summary['ending_net_worth']:,.0f} nominal (${summary['ending_net_worth_real']:,.0f} "
+            f"in today's dollars). Explain what drives this trajectory and how the life events "
+            f"affect it, educationally."
+        )
+        with st.spinner("Finnie is analyzing your timeline..."):
+            result = run_workflow(
+                user_message=summary_msg,
+                user_profile=st.session_state.get("user_profile"),
+            )
+        st.markdown(result["final_response"])
 
 
 def _render_ai_goal_planner() -> None:

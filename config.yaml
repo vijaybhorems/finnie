@@ -84,6 +84,11 @@ tracing:
   project_name: "finnie"
   endpoint: ""  # e.g. http://localhost:4317 (local/gRPC) or https://app.phoenix.arize.com/s/<space> (Phoenix Cloud/HTTP)
 
+planning:
+  default_inflation: 0.03  # used for real (inflation-adjusted) projection view
+  max_horizon_years: 60
+  max_events: 25
+
 ui:
   port: 8501
   theme: "dark"

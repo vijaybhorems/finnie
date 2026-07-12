@@ -110,6 +110,13 @@ class TracingConfig(BaseModel):
     api_key: str = ""   # Phoenix Cloud API key (from app.phoenix.arize.com, not Arize AX)
 
 
+class PlanningConfig(BaseModel):
+    """Life-event timeline projection defaults and caps."""
+    default_inflation: float = 0.03
+    max_horizon_years: int = 60
+    max_events: int = 25
+
+
 class AppConfig(BaseModel):
     name: str = "Finnie - AI Finance Assistant"
     version: str = "1.0.0"
@@ -146,6 +153,7 @@ class Settings(BaseSettings):
     circuit_breaker: CircuitBreakerConfig = CircuitBreakerConfig()
     guardrail: GuardrailConfig = GuardrailConfig()
     tracing: TracingConfig = TracingConfig()
+    planning: PlanningConfig = PlanningConfig()
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -193,6 +201,8 @@ def get_settings() -> Settings:
         overrides["guardrail"] = GuardrailConfig(**yaml_data["guardrail"])
     if "tracing" in yaml_data:
         overrides["tracing"] = TracingConfig(**yaml_data["tracing"])
+    if "planning" in yaml_data:
+        overrides["planning"] = PlanningConfig(**yaml_data["planning"])
     if "app" in yaml_data:
         overrides["app"] = AppConfig(**yaml_data["app"])
 

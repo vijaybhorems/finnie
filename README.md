@@ -144,6 +144,7 @@ Natural conversation with automatic agent routing:
 
 ### Goals Tab
 - **Projection Calculator**: Compare conservative/moderate/aggressive growth scenarios
+- **Life Timeline**: Compose a sequence of life events (home purchase, child, college funding, job change, inheritance, retirement) on top of a baseline projection and see the combined effect on net worth over time, nominal or inflation-adjusted, with an optional AI narration of the trajectory
 - **AI Goal Planner**: Describe your goal in plain English, get a personalized plan
 - **Retirement Calculator**: Check if you're on track for retirement
 
@@ -174,6 +175,9 @@ finnie/
 │   ├── rag/                 # FAISS indexer + retriever
 │   │   ├── indexer.py
 │   │   └── retriever.py
+│   ├── planning/            # Deterministic multi-event net-worth projection engine
+│   │   ├── life_events.py       # LifeEvent schema + closed catalog (6 event kinds)
+│   │   └── projection_engine.py # Year-by-year timeline projection, pure functions
 │   ├── web_app/             # Streamlit UI (4 tabs) + Google OAuth
 │   │   ├── app.py
 │   │   ├── auth.py
@@ -182,7 +186,7 @@ finnie/
 │   │       ├── chat.py
 │   │       ├── portfolio.py
 │   │       ├── market.py
-│   │       └── goals.py
+│   │       └── goals.py         # incl. Life Timeline sub-tab (src/planning)
 │   ├── utils/               # Logging, Redis cache, circuit breaker
 │   │   ├── cache.py
 │   │   ├── circuit_breaker.py
@@ -311,6 +315,32 @@ circuit_breaker:
 
 - **Guardrail** (`src/workflow/guardrail.py`): runs before the router on every turn. A fast blocklist check catches obvious NSFW/unsafe terms without an LLM call; everything else goes through an LLM topic classifier. Any error, malformed output, or off-topic verdict short-circuits the graph straight to `END` with a canned refusal — the router and agents never see a rejected query.
 - **Circuit breaker** (`src/utils/circuit_breaker.py`): one breaker per data provider (yFinance, Alpha Vantage, FRED, NewsAPI). Opens after `failure_threshold` consecutive failures, stays open for `recovery_timeout_seconds`, then allows a single half-open probe request before closing again.
+
+## Life-Event Timeline Projection
+
+The Goals tab's **Life Timeline** sub-tab (`src/web_app/pages/goals.py`) layers a sequence of discrete life events onto a baseline savings projection using a pure, deterministic engine (`src/planning/projection_engine.py`). With no events, it reproduces the same year-by-year math as the existing single-goal projection (`_project_savings` in `src/agents/goal_planning_agent.py`) exactly.
+
+Each event (`src/planning/life_events.py`) resolves to per-year savings and one-time net-worth deltas that the engine folds into the projection:
+
+| Event | Effect |
+|-------|--------|
+| Inheritance | One-time net-worth inflow |
+| Home Purchase | One-time down payment + recurring amortized mortgage payment |
+| Child Birth | Recurring dependent cost, with an optional later college cost block |
+| College Funding | Standalone recurring education outflow |
+| Job Change | Step change (positive or negative) to annual income |
+| Retirement Start | Stops ongoing contributions, begins net drawdown (spend minus Social Security) |
+
+Defaults and caps live under `planning` in `config.yaml`:
+
+```yaml
+planning:
+  default_inflation: 0.03   # used for the real (inflation-adjusted) projection view
+  max_horizon_years: 60
+  max_events: 25
+```
+
+The UI resolves live inflation from FRED's 5-year expectations series where available, falling back to `default_inflation`. Covered by `tests/test_life_events.py` and `tests/test_projection_engine.py`.
 
 ## Observability — Arize Phoenix Tracing
 

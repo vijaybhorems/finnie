@@ -7,6 +7,8 @@ htmlcov/
 .venv/
 .streamlit/secrets.toml
 design_doc_template.md
+brainstorm.md
+prep.md
 explore_prompt.md
 implement_plan.md
 make_proposals_prompt.md
@@ -16,3 +18,4 @@ review_prompt.md
 .DS_Store
 plans/
 research/
+brainstorm/

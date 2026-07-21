@@ -12,11 +12,27 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download the sentence-transformers embedding model so it is baked into the
+# image — the runtime model load then costs no network round-trip to the HF Hub.
+# Keep EMBEDDING_MODEL in sync with `embeddings.model` in config.yaml.
+ENV HF_HOME=/app/.cache/huggingface
+ARG EMBEDDING_MODEL=all-MiniLM-L6-v2
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
+
+# Load the embedding model fully offline at runtime (it is already in the image).
+# Placed AFTER the download above so the build itself can still reach the Hub.
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+
 # Copy application code
 COPY . .
 
-# Build RAG index at startup via entrypoint
-# (index is stored in a Docker volume for persistence)
+# Bake the FAISS index into the image so the first chat query doesn't rebuild it
+# on a cold-started container (e.g. Cloud Run). Runs offline — the embedding model
+# is already in the image (above). Docker Compose mounts a volume over
+# data/faiss_index and its rag_indexer service rebuilds there, so this is harmless
+# there and load-bearing for single-container deploys.
+RUN python -c "from src.rag.indexer import RAGIndexer; RAGIndexer().build_index()"
 
 # Suppress noisy transformers lazy-import warnings (torchvision not needed)
 ENV TRANSFORMERS_VERBOSITY=error

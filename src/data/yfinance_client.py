@@ -1,6 +1,7 @@
 """yFinance client — historical prices, fundamentals, dividends, beta."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 import pandas as pd
@@ -83,6 +84,33 @@ class YFinanceClient:
             logger.error("yfinance_price_error", ticker=ticker, error=str(exc))
             return self._stale_or(key, {"ticker": ticker, "error": str(exc)})
 
+    def get_current_prices(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch current price for many tickers concurrently.
+
+        Returns ``{TICKER: price_dict}`` keyed by upper-cased ticker. Each ticker
+        is fetched through :meth:`get_current_price`, so caching, the circuit
+        breaker, and per-ticker error handling are unchanged — this only replaces
+        sequential network round-trips with parallel ones.
+        """
+        # De-duplicate while preserving order (uppercase to match get_current_price).
+        unique = list(dict.fromkeys(t.upper() for t in tickers if t and t.strip()))
+        if not unique:
+            return {}
+
+        results: dict[str, dict[str, Any]] = {}
+        with ThreadPoolExecutor(max_workers=min(len(unique), 8)) as executor:
+            future_to_ticker = {
+                executor.submit(self.get_current_price, ticker): ticker
+                for ticker in unique
+            }
+            for future, ticker in future_to_ticker.items():
+                try:
+                    results[ticker] = future.result()
+                except Exception as exc:  # get_current_price already guards, but be safe
+                    logger.error("yfinance_price_error", ticker=ticker, error=str(exc))
+                    results[ticker] = {"ticker": ticker, "error": str(exc)}
+        return results
+
     def get_sector_performance(self) -> dict[str, Any]:
         """US sector performance (1-day % change) derived from SPDR sector ETFs.
 
@@ -96,9 +124,11 @@ class YFinanceClient:
         if cached:
             return cached
 
+        # Fetch all sector ETFs in parallel, then build the ordered result.
+        prices = self.get_current_prices(list(_SECTOR_ETFS.values()))
         one_day: dict[str, str] = {}
         for sector, etf in _SECTOR_ETFS.items():
-            change_pct = self.get_current_price(etf).get("change_pct")
+            change_pct = prices.get(etf.upper(), {}).get("change_pct")
             if change_pct is not None:
                 one_day[sector] = f"{change_pct:+.2f}%"
 

@@ -48,11 +48,28 @@ if not is_user_authorized():
     render_unauthorized_page()
     st.stop()
 
-# ── Import page modules ───────────────────────────────────────────────────────
-from src.web_app.pages.chat import render_chat_page
-from src.web_app.pages.goals import render_goals_page
-from src.web_app.pages.market import render_market_page
-from src.web_app.pages.portfolio import render_portfolio_page
+
+# ── Startup warm-up ───────────────────────────────────────────────────────────
+# Prime the heavy singletons (LangGraph workflow + sentence-transformers embedding
+# model) once per process, behind a one-time spinner, so their ~11s import/load
+# cost is paid at server start instead of on the user's first chat message.
+# @st.cache_resource runs the body once per process and returns instantly on every
+# later rerun/session.
+@st.cache_resource(show_spinner="Warming up Finnie…")
+def _warm_up() -> bool:
+    from src.rag.retriever import get_retriever
+    from src.workflow.graph import build_graph
+
+    build_graph()
+    try:
+        get_retriever().warm_up()
+    except Exception as exc:  # non-fatal: RAG falls back to lazy load on first query
+        logger.warning("warmup_retriever_failed", error=str(exc))
+    logger.info("startup_warmup_complete")
+    return True
+
+
+_warm_up()
 
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 
@@ -115,13 +132,20 @@ def render_sidebar() -> str:
 def main() -> None:
     page = render_sidebar()
 
+    # Import page modules lazily so landing on the default Chat tab doesn't pull
+    # in the other tabs' dependencies (plotly, yfinance, portfolio/market/goals
+    # code). Each module is imported once per process, then cached in sys.modules.
     if page == "💬 Chat":
+        from src.web_app.pages.chat import render_chat_page
         render_chat_page()
     elif page == "📊 Portfolio":
+        from src.web_app.pages.portfolio import render_portfolio_page
         render_portfolio_page()
     elif page == "📈 Market":
+        from src.web_app.pages.market import render_market_page
         render_market_page()
     elif page == "🎯 Goals":
+        from src.web_app.pages.goals import render_goals_page
         render_goals_page()
 
 

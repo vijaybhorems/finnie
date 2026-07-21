@@ -54,7 +54,9 @@ def _render_holdings_input() -> None:
         holdings = edited_df.to_dict(orient="records")
         st.session_state.portfolio_holdings = holdings
         with st.spinner("Fetching market data..."):
-            _display_portfolio_metrics(holdings)
+            # Fetch + store only; rendering happens once in the block below so the
+            # charts aren't drawn twice in the same run.
+            st.session_state.portfolio_metrics = YFinanceClient().get_portfolio_metrics(holdings)
 
     if col2.button("🤖 Get AI Analysis", type="secondary", use_container_width=True):
         holdings = edited_df.to_dict(orient="records")
@@ -62,16 +64,12 @@ def _render_holdings_input() -> None:
         st.session_state.portfolio_ai_requested = True
         st.rerun()
 
-    # Show portfolio metrics if already fetched
+    # Render fetched metrics once per run (persists across reruns).
     if "portfolio_metrics" in st.session_state:
-        _render_portfolio_charts(st.session_state.portfolio_metrics)
+        _render_portfolio_metrics(st.session_state.portfolio_metrics)
 
 
-def _display_portfolio_metrics(holdings: list[dict]) -> None:
-    yf_client = YFinanceClient()
-    metrics = yf_client.get_portfolio_metrics(holdings)
-    st.session_state.portfolio_metrics = metrics
-
+def _render_portfolio_metrics(metrics: dict) -> None:
     if "error" in metrics:
         st.error(f"Error fetching data: {metrics['error']}")
         return
@@ -122,8 +120,8 @@ def _render_portfolio_charts(metrics: dict) -> None:
     )
 
     col1, col2 = st.columns(2)
-    col1.plotly_chart(fig_alloc, use_container_width=True)
-    col2.plotly_chart(fig_gl, use_container_width=True)
+    col1.plotly_chart(fig_alloc, use_container_width=True, key="portfolio_alloc_chart")
+    col2.plotly_chart(fig_gl, use_container_width=True, key="portfolio_gl_chart")
 
     # Sector breakdown
     sector_df = df[df["sector"].notna()].copy()
@@ -137,7 +135,7 @@ def _render_portfolio_charts(metrics: dict) -> None:
             labels={"position_value": "Value ($)", "sector": "Sector"},
             color="sector",
         )
-        st.plotly_chart(fig_sector, use_container_width=True)
+        st.plotly_chart(fig_sector, use_container_width=True, key="portfolio_sector_chart")
 
     # Holdings detail table
     display_df = df[["ticker", "shares", "avg_cost", "current_price", "position_value", "gain_loss", "gain_loss_pct", "pe_ratio", "beta", "sector"]].copy()

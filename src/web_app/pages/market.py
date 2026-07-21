@@ -38,9 +38,10 @@ def _render_market_snapshot() -> None:
 
     st.subheader("Major Indices")
     with st.spinner("Loading market data..."):
+        prices = yf_client.get_current_prices(list(_MAJOR_INDICES.values()))
         cols = st.columns(len(_MAJOR_INDICES))
         for i, (name, ticker) in enumerate(_MAJOR_INDICES.items()):
-            data = yf_client.get_current_price(ticker)
+            data = prices.get(ticker.upper(), {})
             price = data.get("current_price")
             change_pct = data.get("change_pct")
             if price and change_pct is not None:
@@ -92,11 +93,12 @@ def _render_market_snapshot() -> None:
         key="watchlist_input",
     )
     if st.button("Refresh Watchlist", type="secondary"):
-        tickers = [t.strip().upper() for t in watchlist_input.split(",") if t.strip()]
+        tickers = [t.strip().upper() for t in watchlist_input.split(",") if t.strip()][:10]
         with st.spinner("Fetching watchlist..."):
+            prices = yf_client.get_current_prices(tickers)
             rows = []
-            for ticker in tickers[:10]:
-                data = yf_client.get_current_price(ticker)
+            for ticker in tickers:
+                data = prices.get(ticker.upper(), {})
                 rows.append({
                     "Ticker": ticker,
                     "Price": f"${data.get('current_price', 0):,.2f}" if data.get('current_price') else "—",

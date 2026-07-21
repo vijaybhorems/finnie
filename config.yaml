@@ -6,7 +6,9 @@ app:
 
 llm:
   provider: "anthropic"
-  model: "claude-sonnet-4-6"
+  model: "claude-sonnet-5"
+  # NOTE: temperature is ignored for Sonnet 5 / Opus 4.8 — those models reject
+  # sampling params (400). Kept for reference / legacy models only. See src/core/llm.py.
   temperature: 0.1
   max_tokens: 4096
 

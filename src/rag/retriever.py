@@ -50,6 +50,15 @@ class RAGRetriever:
 
         return True
 
+    def warm_up(self) -> bool:
+        """Eagerly load the FAISS index and embedding model.
+
+        Call this once at server startup so the heavy sentence-transformers /
+        torch import and model load are paid before the first user query rather
+        than on it.
+        """
+        return self._ensure_index()
+
     def search(
         self,
         query: str,

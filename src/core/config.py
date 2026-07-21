@@ -46,8 +46,8 @@ _ROOT = Path(__file__).parent.parent.parent
 
 class LLMConfig(BaseModel):
     provider: str = "anthropic"
-    model: str = "claude-sonnet-4-6"
-    temperature: float = 0.1
+    model: str = "claude-sonnet-5"
+    temperature: float = 0.1  # only applied to models that accept sampling params (see llm.py)
     max_tokens: int = 4096
 
 

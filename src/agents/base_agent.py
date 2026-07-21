@@ -9,7 +9,7 @@ import httpx
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.core.llm import get_llm
+from src.core.llm import get_llm, message_text
 from src.core.state import FinnieState
 from src.utils.logger import get_logger
 
@@ -102,7 +102,7 @@ class BaseAgent(ABC):
                     attempt=attempt,
                     latency_ms=latency_ms,
                 )
-                return response.content
+                return message_text(response)
 
             except _RETRYABLE_EXCEPTIONS as exc:
                 latency_ms = int((time.monotonic() - t0) * 1000)

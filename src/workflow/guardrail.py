@@ -15,7 +15,7 @@ import re
 from typing import Any
 
 from src.core.config import get_settings
-from src.core.llm import get_llm
+from src.core.llm import get_llm, message_text
 from src.core.state import AgentType, FinnieState
 from src.utils.logger import get_logger
 
@@ -109,7 +109,7 @@ def guardrail_node(state: FinnieState) -> dict[str, Any]:
             SystemMessage(content=_GUARDRAIL_SYSTEM),
             HumanMessage(content=f"Classify this query: {query}"),
         ])
-        raw = str(response.content).strip()
+        raw = message_text(response).strip()
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not json_match:
             return _reject("classifier returned no parseable verdict")

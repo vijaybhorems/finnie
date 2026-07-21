@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from src.core.llm import get_llm
+from src.core.llm import get_llm, message_text
 from src.core.state import AgentType, FinnieState
 from src.utils.logger import get_logger
 
@@ -59,7 +59,7 @@ def router_node(state: FinnieState) -> dict[str, Any]:
 
         import json
         import re
-        raw = response.content.strip()
+        raw = message_text(response).strip()
         # Extract JSON even if wrapped in markdown code blocks
         json_match = re.search(r"\{[^{}]+\}", raw, re.DOTALL)
         if json_match:

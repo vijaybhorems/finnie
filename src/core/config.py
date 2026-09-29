@@ -100,6 +100,21 @@ class GuardrailConfig(BaseModel):
     )
 
 
+class FAQCacheConfig(BaseModel):
+    """Semantic answer cache served before the classifier."""
+    enabled: bool = True
+    similarity_threshold: float = 0.92  # conservative: a wrong figure beats a miss
+    ttl_seconds: int = 604800  # 7 days
+    max_entries: int = 500
+
+
+class FastPathConfig(BaseModel):
+    """Phase-1 latency features. Each flag is independently reversible."""
+    merged_classifier: bool = True  # one guardrail+router call instead of two
+    streaming: bool = True  # stream agent tokens to the UI
+    faq_cache: FAQCacheConfig = FAQCacheConfig()
+
+
 class TracingConfig(BaseModel):
     """Arize Phoenix / OpenInference tracing configuration."""
     enabled: bool = False
@@ -152,6 +167,7 @@ class Settings(BaseSettings):
     workflow: WorkflowConfig = WorkflowConfig()
     circuit_breaker: CircuitBreakerConfig = CircuitBreakerConfig()
     guardrail: GuardrailConfig = GuardrailConfig()
+    fast_path: FastPathConfig = FastPathConfig()
     tracing: TracingConfig = TracingConfig()
     planning: PlanningConfig = PlanningConfig()
 
@@ -199,6 +215,8 @@ def get_settings() -> Settings:
         overrides["circuit_breaker"] = CircuitBreakerConfig(**yaml_data["circuit_breaker"])
     if "guardrail" in yaml_data:
         overrides["guardrail"] = GuardrailConfig(**yaml_data["guardrail"])
+    if "fast_path" in yaml_data:
+        overrides["fast_path"] = FastPathConfig(**yaml_data["fast_path"])
     if "tracing" in yaml_data:
         overrides["tracing"] = TracingConfig(**yaml_data["tracing"])
     if "planning" in yaml_data:

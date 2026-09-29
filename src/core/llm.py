@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional
 
 from langchain_anthropic import ChatAnthropic
 
@@ -43,13 +43,27 @@ def message_text(response: Any) -> str:
 _NO_SAMPLING_PARAMS = ("claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-fable-5")
 
 
-@lru_cache(maxsize=1)
-def get_llm() -> ChatAnthropic:
+@lru_cache(maxsize=2)
+def get_llm(streaming: Optional[bool] = None) -> ChatAnthropic:
+    """Return the shared ChatAnthropic client.
+
+    ``streaming`` controls whether ``.invoke()`` issues a streaming request
+    internally. It must be on for LangGraph's ``stream_mode="messages"`` to emit
+    per-token events from agent nodes — the agents still call ``.invoke()`` and
+    still get a complete message back. Pass ``False`` for structured-output
+    calls (the classifier), which have no use for token events.
+
+    Defaults to the ``fast_path.streaming`` flag.
+    """
     settings = get_settings()
+    if streaming is None:
+        streaming = settings.fast_path.streaming
+
     kwargs: dict = {
         "model": settings.llm.model,
         "max_tokens": settings.llm.max_tokens,
         "anthropic_api_key": settings.anthropic_api_key,
+        "streaming": streaming,
     }
     # Only send temperature to models that still accept it; newer models 400 on it.
     if not settings.llm.model.startswith(_NO_SAMPLING_PARAMS):

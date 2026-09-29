@@ -54,8 +54,8 @@ class RAGIndexer:
         self._overlap = self._settings.rag.chunk_overlap
 
     def _get_embedder(self):
-        from sentence_transformers import SentenceTransformer
-        return SentenceTransformer(self._settings.embeddings.model)
+        from src.core.embeddings import get_embedder
+        return get_embedder()
 
     def _load_documents(self) -> list[dict[str, Any]]:
         """Load all .txt and .md files from the knowledge base."""

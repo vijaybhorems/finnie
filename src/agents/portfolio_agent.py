@@ -10,6 +10,7 @@ from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
 from src.data.alpha_vantage_client import AlphaVantageClient
 from src.data.yfinance_client import YFinanceClient
+from src.utils.parallel import gather
 
 
 class PortfolioAgent(BaseAgent):
@@ -35,19 +36,17 @@ class PortfolioAgent(BaseAgent):
             # Try to parse portfolio from latest message
             portfolio = self._parse_portfolio_from_message(state)
 
-        portfolio_data: dict[str, Any] = {}
+        # Holdings metrics and sector performance hit different providers —
+        # fetch concurrently rather than one after the other.
+        tasks: dict[str, Any] = {"sector": self._av.get_sector_performance}
         if portfolio:
-            try:
-                portfolio_data = self._yf.get_portfolio_metrics(portfolio)
-            except Exception as exc:
-                self._logger.error("portfolio_metrics_error", error=str(exc))
-                portfolio_data = {"error": str(exc)}
+            tasks["portfolio"] = lambda: self._yf.get_portfolio_metrics(portfolio)
+        fetched = gather(tasks)
 
-        sector_performance = {}
-        try:
-            sector_performance = self._av.get_sector_performance()
-        except Exception as exc:
-            self._logger.warning("sector_data_error", error=str(exc))
+        portfolio_data: dict[str, Any] = fetched.get("portfolio") or {}
+        if portfolio and not portfolio_data:
+            portfolio_data = {"error": "portfolio metrics unavailable"}
+        sector_performance = fetched.get("sector") or {}
 
         portfolio_json = json.dumps(portfolio_data, indent=2, default=str) if portfolio_data else "No portfolio data provided."
         sector_json = json.dumps(sector_performance.get("one_day", {}), indent=2) if sector_performance and "error" not in sector_performance else "{}"

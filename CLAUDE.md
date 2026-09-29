@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Finnie is a multi-agent AI finance-education assistant: LangGraph orchestrates a guardrail → router → one-of-six-agents pipeline, backed by a FAISS RAG knowledge base and live market/macro/news data clients, served through a Streamlit UI behind Google OAuth.
+Finnie is a multi-agent AI finance-education assistant: LangGraph orchestrates a cache → classify → one-of-six-agents pipeline, backed by a FAISS RAG knowledge base and live market/macro/news data clients, served through a Streamlit UI behind Google OAuth.
 
 ## Commands
 
@@ -45,10 +45,16 @@ Tests auto-mock required env vars and clear LRU-cached singletons (`get_settings
 
 ## Architecture
 
-**Request flow:** `src/workflow/graph.py` builds a LangGraph `StateGraph` over `FinnieState` (`src/core/state.py`): `START → guardrail → (router → one of 6 agent nodes) | END`. `run_workflow()` is the single entry point (also used directly by `src/web_app/pages/chat.py`).
+**Request flow:** `src/workflow/graph.py` builds a LangGraph `StateGraph` over `FinnieState` (`src/core/state.py`): `START → faq_cache → (classify → one of 6 agent nodes → faq_cache_write) | END`. `run_workflow()` is the single entry point; `stream_workflow()` is the streaming variant used by `src/web_app/pages/chat.py`.
 
-- **Guardrail** (`src/workflow/guardrail.py`) runs before the router on *every* turn. Fast blocklist check for NSFW/unsafe terms (no LLM call), otherwise an LLM finance-scope classifier. Fails closed: any classifier error, malformed output, or off-topic verdict routes straight to `END` with the canned refusal from `GuardrailConfig.refusal_message` — agents never see a rejected query. Toggle via `guardrail.enabled` in `config.yaml`.
-- **Router** (`src/workflow/router.py`) sets `state.next_agent`; `route_to_agent()` in `graph.py` maps the `AgentType` enum to a node name (defaults to `finance_qa` if unset).
+The graph shape is controlled by two independently reversible flags under `fast_path` in `config.yaml` — with both off it rebuilds the original `START → guardrail → router → agent → END` pipeline, which is still tested:
+
+- **FAQ cache** (`src/workflow/faq_cache.py` + `src/utils/semantic_cache.py`, flag `fast_path.faq_cache.enabled`) runs first. Exact match on the normalised query, then cosine over cached query embeddings at `similarity_threshold` (0.92). A hit ends the turn with zero LLM calls. `faq_cache_write` runs after each agent and only stores answers that are safe to reuse: `finance_qa`/`tax_education` only, `needs_macro is False`, and no live market data in `financial_data`. Every entry is stamped with `get_kb_version()` (hash of the knowledge base) and the tax year, and ignored once either moves. Every cache operation fails open — an error is a miss, never a failed turn.
+- **Classify** (`src/workflow/classify.py`, flag `fast_path.merged_classifier`) replaces the guardrail and router with one `with_structured_output(Verdict)` call returning `{on_topic, agent, needs_macro, reason}`. Same safety contract as before: blocklist fast path (no LLM call), fails closed to `GuardrailConfig.refusal_message` on any error, malformed verdict, or off-topic result. `needs_macro` gates the FRED fetch in `FinanceQAAgent` — `None` means the legacy path ran and agents fetch unconditionally.
+- **Legacy nodes** (`src/workflow/guardrail.py`, `router.py`) are still present and tested; `classify.py` imports the blocklist helper from `guardrail.py` rather than duplicating it.
+- **Streaming** (flag `fast_path.streaming`) sets `streaming=True` on the shared `ChatAnthropic`, which is what makes LangGraph's `stream_mode="messages"` emit per-token events from `.invoke()` inside agent nodes. `stream_workflow()` filters those to `AGENT_NODES` so the classifier's own tokens never reach the UI, then flushes the disclaimer the agent appends after the model call. `get_llm(streaming=False)` is used for the structured classifier call.
+- **Parallel fetches**: agents that hit more than one provider per turn (`finance_qa`, `portfolio`, `market_analysis`, `news_synthesizer`) issue them concurrently through `gather()` in `src/utils/parallel.py`; a failing task yields `None` and a warning rather than failing the turn.
+- **Embeddings**: `src/core/embeddings.py` owns the one `SentenceTransformer` instance, shared by the RAG retriever/indexer and the FAQ cache — don't construct a second one.
 - **Agents** (`src/agents/`) all extend `BaseAgent` (`src/agents/base_agent.py`), which owns: system-prompt assembly + disclaimer injection, and `_invoke_llm()` — a retry wrapper (3 attempts, exponential backoff) around transient `httpx` connection errors, emitting structured `llm_call_*` logs. Agents are lazily instantiated singletons per process (`_AGENTS` dict in `graph.py`), each holding its own `get_llm()` client.
   - When editing `_build_prompt()`, note that system text is escaped (`{`→`{{`) because RAG context / live data / user profile strings can contain literal braces that would otherwise be misparsed as prompt template variables.
 - **State** (`FinnieState`) is the single object threaded through every node: conversation `messages` (LangGraph-managed via `add_messages`), routing fields, guardrail verdict (`is_on_topic`), `UserProfile`, `FinancialData` payload, `rag_context`, and `final_response`.

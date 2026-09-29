@@ -81,6 +81,16 @@ circuit_breaker:
 guardrail:
   enabled: true  # pre-router finance/NSFW gate; fails closed on classifier error
 
+fast_path:
+  # Phase 1 latency features — each flag is independently reversible.
+  merged_classifier: true   # one structured guardrail+router call instead of two
+  streaming: true           # stream agent tokens into the chat UI
+  faq_cache:
+    enabled: true
+    similarity_threshold: 0.92  # below this, fall through to the full workflow
+    ttl_seconds: 604800         # 7 days
+    max_entries: 500
+
 tracing:
   enabled: false  # Arize Phoenix; enable and set endpoint to export spans
   project_name: "finnie"

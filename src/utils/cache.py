@@ -48,13 +48,24 @@ class Cache:
     def _init_redis(self):
         try:
             import redis
+            from redis.backoff import NoBackoff
+            from redis.retry import Retry
 
             client = redis.Redis(
                 host=self._settings.redis.host,
                 port=self._settings.redis.port,
                 db=self._settings.redis.db,
                 decode_responses=True,
-                socket_connect_timeout=2,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+                # redis-py >= 5 retries connection errors with exponential
+                # backoff by default, so an unreachable Redis blocked the first
+                # cache lookup for ~6s before falling back. The cache is
+                # optional and every caller already degrades gracefully, so fail
+                # fast: one immediate retry covers a transient blip, and a dead
+                # host costs milliseconds instead of seconds.
+                retry=Retry(NoBackoff(), 1),
+                retry_on_timeout=False,
             )
             client.ping()
             logger.info("redis_connected", host=self._settings.redis.host)

@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
+from src.utils.parallel import gather
 from src.data.news_client import NewsClient
 from src.data.yfinance_client import YFinanceClient
 
@@ -33,18 +34,24 @@ class NewsSynthesizerAgent(BaseAgent):
         user_messages = [m for m in state.messages if hasattr(m, "type") and m.type == "human"]
         query = str(user_messages[-1].content) if user_messages else "latest financial news"
 
-        # Fetch news
-        headlines = self._news.get_financial_headlines(query=query, page_size=8)
-        sec_filings = self._news.get_sec_filings(max_items=5)
+        # Headlines, filings and per-ticker news are independent feeds — fetch
+        # them concurrently instead of one round trip after another.
+        portfolio_tickers = [h["ticker"] for h in state.user_profile.portfolio][:3]
+        tasks = {
+            "headlines": lambda: self._news.get_financial_headlines(query=query, page_size=8),
+            "filings": lambda: self._news.get_sec_filings(max_items=5),
+        }
+        for ticker in portfolio_tickers:
+            tasks[f"ticker:{ticker}"] = lambda t=ticker: self._news.get_ticker_news(t, page_size=3)
 
-        headlines_text = self._format_headlines(headlines)
-        sec_text = self._format_filings(sec_filings)
+        fetched = gather(tasks)
 
-        # Check for portfolio tickers in news
-        portfolio_tickers = [h["ticker"] for h in state.user_profile.portfolio]
+        headlines_text = self._format_headlines(fetched.get("headlines") or [])
+        sec_text = self._format_filings(fetched.get("filings") or [])
+
         ticker_news_text = ""
-        for ticker in portfolio_tickers[:3]:
-            news = self._news.get_ticker_news(ticker, page_size=3)
+        for ticker in portfolio_tickers:
+            news = fetched.get(f"ticker:{ticker}")
             if news:
                 ticker_news_text += f"\n\n{ticker} News:\n" + self._format_headlines(news)
 

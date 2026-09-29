@@ -9,6 +9,7 @@ from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
 from src.data.fred_client import FredClient
 from src.rag.retriever import get_retriever
+from src.utils.parallel import gather
 
 
 class FinanceQAAgent(BaseAgent):
@@ -33,12 +34,22 @@ class FinanceQAAgent(BaseAgent):
         user_messages = [m for m in state.messages if hasattr(m, "type") and m.type == "human"]
         query = str(user_messages[-1].content) if user_messages else ""
 
-        # RAG retrieval
-        rag_context = self._retriever.get_context(query, top_k=4)
+        # RAG and the macro snapshot are independent network/disk calls, so
+        # fetch them concurrently. Macro is skipped entirely when the classifier
+        # judged it irrelevant (needs_macro is None on the legacy path, which
+        # always fetched — preserve that).
+        want_macro = state.needs_macro is not False
+        tasks = {"rag": lambda: self._retriever.get_context(query, top_k=4)}
+        if want_macro:
+            tasks["macro"] = self._fred.get_macro_snapshot
+        fetched = gather(tasks)
 
-        # Optionally fetch macro snapshot to ground answers
-        macro = self._fred.get_macro_snapshot()
-        macro_str = self._format_macro(macro)
+        rag_context = fetched.get("rag") or ""
+        macro_str = (
+            self._format_macro(fetched.get("macro") or {})
+            if want_macro
+            else "Not fetched — this question does not depend on current macro readings."
+        )
 
         additional_system = f"""
 {self._get_user_context_str(state)}

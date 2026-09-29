@@ -45,19 +45,29 @@ class RAGRetriever:
             logger.info("faiss_index_loaded", chunks=len(self._metadata))
 
         if self._embedder is None:
-            from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer(self._settings.embeddings.model)
+            # Shared with the FAQ semantic cache — one model load per process.
+            from src.core.embeddings import get_embedder
+            self._embedder = get_embedder()
 
         return True
 
     def warm_up(self) -> bool:
-        """Eagerly load the FAISS index and embedding model.
+        """Eagerly load the FAISS index and embedding model, and run one encode.
 
         Call this once at server startup so the heavy sentence-transformers /
         torch import and model load are paid before the first user query rather
-        than on it.
+        than on it. The throwaway encode matters as much as the load: torch's
+        first inference initialises lazily and costs ~300ms, which would
+        otherwise land on the first query — and on the FAQ cache's first
+        semantic lookup, the one path that is supposed to be instant.
         """
-        return self._ensure_index()
+        if not self._ensure_index():
+            return False
+        try:
+            self._embedder.encode(["warm up"])
+        except Exception as exc:  # noqa: BLE001 — warm-up is best effort
+            logger.warning("embedder_warmup_encode_failed", error=str(exc))
+        return True
 
     def search(
         self,

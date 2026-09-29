@@ -21,11 +21,21 @@ def mock_env_vars(monkeypatch):
 def clear_lru_caches():
     """Clear LRU-cached singletons between tests to prevent state leakage."""
     yield
+    import src.utils.cache as cache_module
     from src.core.config import get_settings
+    from src.core.embeddings import get_embedder
     from src.core.llm import get_llm
-    from src.workflow.graph import build_graph
+    from src.rag.version import get_kb_version
     from src.utils.circuit_breaker import reset_breakers
+    from src.utils.semantic_cache import get_faq_cache
+    from src.workflow.graph import build_graph
     get_settings.cache_clear()
     get_llm.cache_clear()
     build_graph.cache_clear()
+    get_faq_cache.cache_clear()
+    get_kb_version.cache_clear()
+    get_embedder.cache_clear()
+    # The cache singleton holds an in-memory fallback dict that would otherwise
+    # leak entries (and FAQ answers) between tests.
+    cache_module._cache_instance = None
     reset_breakers()

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
+from src.utils.parallel import gather
 from src.data.alpha_vantage_client import AlphaVantageClient
 from src.data.yfinance_client import YFinanceClient
 
@@ -39,27 +40,30 @@ class MarketAnalysisAgent(BaseAgent):
         # Extract any tickers mentioned in the query
         mentioned_tickers = self._extract_tickers(query)
 
-        # Market snapshot
-        index_data = {}
-        for ticker in self.INDEX_TICKERS:
-            index_data[ticker] = self._yf.get_current_price(ticker)
+        # Every quote, the sector sweep and each ticker's indicators are
+        # independent provider calls. Issued serially they dominated the turn;
+        # run them all concurrently instead.
+        focus_tickers = mentioned_tickers[:3]  # limit to avoid rate limits
+        tasks: dict[str, Any] = {
+            f"index:{ticker}": (lambda t=ticker: self._yf.get_current_price(t))
+            for ticker in self.INDEX_TICKERS
+        }
+        tasks["sector"] = self._yf.get_sector_performance
+        for ticker in focus_tickers:
+            tasks[f"rsi:{ticker}"] = lambda t=ticker: self._av.get_rsi(t)
+            tasks[f"price:{ticker}"] = lambda t=ticker: self._yf.get_current_price(t)
 
-        # Sector performance
-        sector_data = {}
-        try:
-            sector_data = self._yf.get_sector_performance()
-        except Exception as exc:
-            self._logger.warning("sector_data_error", error=str(exc))
+        fetched = gather(tasks)
 
-        # Technical analysis for mentioned tickers
-        technical_data = {}
-        for ticker in mentioned_tickers[:3]:  # Limit to avoid rate limits
-            rsi = self._av.get_rsi(ticker)
-            price = self._yf.get_current_price(ticker)
-            technical_data[ticker] = {
-                "price": price,
-                "rsi": rsi,
+        index_data = {t: fetched.get(f"index:{t}") for t in self.INDEX_TICKERS}
+        sector_data = fetched.get("sector") or {}
+        technical_data = {
+            ticker: {
+                "price": fetched.get(f"price:{ticker}"),
+                "rsi": fetched.get(f"rsi:{ticker}"),
             }
+            for ticker in focus_tickers
+        }
 
         index_json = json.dumps(index_data, indent=2, default=str)
         sector_json = json.dumps(sector_data.get("one_day", {}), indent=2) if sector_data and "error" not in sector_data else "{}"

@@ -46,7 +46,8 @@ class NewsSynthesizerAgent(BaseAgent):
 
         fetched = gather(tasks)
 
-        headlines_text = self._format_headlines(fetched.get("headlines") or [])
+        headlines = fetched.get("headlines") or []
+        headlines_text = self._format_headlines(headlines)
         sec_text = self._format_filings(fetched.get("filings") or [])
 
         ticker_news_text = ""
@@ -82,7 +83,7 @@ Keep the tone educational — help them develop financial news literacy.
 
         updated_financial_data = state.financial_data.model_copy()
         updated_financial_data.news_headlines = [h["title"] for h in headlines]
-        updated_financial_data.sources = list({h["source"] for h in headlines})
+        updated_financial_data.sources = list({h["source"] for h in headlines if h.get("source")})
 
         return {
             "messages": [AIMessage(content=response_text, name=self.name)],

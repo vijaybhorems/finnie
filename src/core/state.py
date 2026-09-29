@@ -50,8 +50,15 @@ class FinnieState(BaseModel):
     next_agent: Optional[AgentType] = None
     router_reasoning: str = ""
 
-    # Guardrail verdict (set by guardrail_node; None until evaluated)
+    # Guardrail verdict (set by the guardrail/classify node; None until evaluated)
     is_on_topic: Optional[bool] = None
+
+    # Whether the classifier judged live macro data relevant to this query.
+    # None = not classified (legacy guardrail+router path) -> agents fetch as before.
+    needs_macro: Optional[bool] = None
+
+    # True when the response was served from the semantic FAQ cache (no LLM call).
+    cache_hit: bool = False
 
     # User context
     user_profile: UserProfile = Field(default_factory=UserProfile)

@@ -4,7 +4,8 @@ from __future__ import annotations
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 
-from src.workflow.graph import run_workflow
+from src.core.config import get_settings
+from src.workflow.graph import run_workflow, stream_workflow
 
 _AGENT_LABELS = {
     "finance_qa": "📚 Finance Q&A",
@@ -54,7 +55,8 @@ def render_chat_page() -> None:
             if role == "assistant" and "agent" in msg:
                 label = _AGENT_LABELS.get(msg["agent"], msg["agent"])
                 reasoning = msg.get("reasoning", "")
-                st.caption(f"Handled by: {label}" + (f" — {reasoning}" if reasoning else ""))
+                prefix = "⚡ Instant answer — " if msg.get("cached") else "Handled by: "
+                st.caption(f"{prefix}{label}" + (f" — {reasoning}" if reasoning else ""))
 
     # Handle pending quick prompt
     if "pending_prompt" in st.session_state:
@@ -75,43 +77,63 @@ def render_chat_page() -> None:
             st.rerun()
 
 
-def _process_message(user_input: str) -> None:
-    # Add user message to display history
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    # Show spinner while processing
-    with st.spinner("Finnie is thinking..."):
-        try:
-            result = run_workflow(
+def _run_turn(user_input: str) -> dict:
+    """Execute one workflow turn, streaming into the chat when enabled."""
+    if not get_settings().fast_path.streaming:
+        with st.spinner("Finnie is thinking..."):
+            return run_workflow(
                 user_message=user_input,
                 conversation_history=st.session_state.lc_messages,
                 user_profile=st.session_state.get("user_profile"),
             )
-            response = result["final_response"]
-            agent_used = result["agent_used"]
-            reasoning = result["router_reasoning"]
 
-            # Update LangChain history for next turn
-            st.session_state.lc_messages.append(HumanMessage(content=user_input))
-            st.session_state.lc_messages.append(AIMessage(content=response))
+    # Streaming path: render tokens as they arrive; `sink` receives the full
+    # result once the graph finishes.
+    sink: dict = {}
+    with st.chat_message("assistant", avatar="💹"):
+        st.write_stream(
+            stream_workflow(
+                user_message=user_input,
+                conversation_history=st.session_state.lc_messages,
+                user_profile=st.session_state.get("user_profile"),
+                sink=sink,
+            )
+        )
+    return sink
 
-            # Trim history to avoid context overflow
-            max_history = 20
-            if len(st.session_state.lc_messages) > max_history * 2:
-                st.session_state.lc_messages = st.session_state.lc_messages[-(max_history * 2):]
 
-            # Add assistant message to display history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response,
-                "agent": agent_used,
-                "reasoning": reasoning,
-            })
+def _process_message(user_input: str) -> None:
+    # Add user message to display history
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-        except Exception as exc:
-            error_msg = f"Sorry, I encountered an error: {exc}"
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": error_msg,
-                "agent": "error",
-            })
+    try:
+        result = _run_turn(user_input)
+        response = result.get("final_response", "")
+        agent_used = result.get("agent_used", "finance_qa")
+        reasoning = result.get("router_reasoning", "")
+
+        # Update LangChain history for next turn
+        st.session_state.lc_messages.append(HumanMessage(content=user_input))
+        st.session_state.lc_messages.append(AIMessage(content=response))
+
+        # Trim history to avoid context overflow
+        max_history = 20
+        if len(st.session_state.lc_messages) > max_history * 2:
+            st.session_state.lc_messages = st.session_state.lc_messages[-(max_history * 2):]
+
+        # Add assistant message to display history
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response,
+            "agent": agent_used,
+            "reasoning": reasoning,
+            "cached": bool(result.get("cache_hit", False)),
+        })
+
+    except Exception as exc:
+        error_msg = f"Sorry, I encountered an error: {exc}"
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": error_msg,
+            "agent": "error",
+        })

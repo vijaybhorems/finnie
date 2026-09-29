@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 import httpx
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage, SystemMessage
 
-from src.core.llm import get_llm, message_text
+from src.agents.prompts import load_prompt, shared_system_prompt
+from src.core.config import get_settings
+from src.core.llm import get_llm, message_text, token_usage
 from src.core.state import FinnieState
 from src.utils.logger import get_logger
 
@@ -23,46 +24,90 @@ _DISCLAIMER = (
     "Consult a registered financial advisor before making investment decisions.*"
 )
 
+# Agents already warned that their prompt is not being cached (warn once each).
+_CACHE_INACTIVE_WARNED: set[str] = set()
+
+
+def _cache_control() -> Optional[dict[str, str]]:
+    """The cache_control marker for stable blocks, or None when caching is off."""
+    caching = get_settings().llm.prompt_caching
+    if not caching.enabled:
+        return None
+    control = {"type": "ephemeral"}
+    if caching.ttl == "1h":
+        control["ttl"] = "1h"
+    return control
+
+
+def _text_block(text: str, cache_control: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    block: dict[str, Any] = {"type": "text", "text": text}
+    if cache_control:
+        block["cache_control"] = cache_control
+    return block
+
 
 class BaseAgent(ABC):
     """Abstract base for all Finnie agents."""
 
     name: str = "Base Agent"
     description: str = "Base financial agent"
+    # Task instructions: src/agents/prompts/<prompt_name>.md
+    prompt_name: str = ""
 
     def __init__(self) -> None:
         self._llm = get_llm()
         self._logger = get_logger(self.__class__.__name__)
 
+    # ── Prompt assembly ──────────────────────────────────────────────────────
+    #
+    # Prompt caching is a prefix match, so the system prompt is ordered from
+    # most to least stable (see src/agents/prompts/__init__.py):
+    #
+    #   1. shared_system_prompt()  identical for all agents          [cached]
+    #   2. role_prompt             this agent's role and task        [cached]
+    #   3. request context         profile, retrieved text, live data
+    #
+    # Blocks 1 and 2 must never contain anything that varies per request —
+    # a timestamp or a user id there would silently turn every call into a
+    # cache write. Per-request content belongs in the `context` argument of
+    # _invoke_llm, which lands in block 3.
+
+    @property
+    def role_prompt(self) -> str:
+        """This agent's stable instructions: role, task and static reference data."""
+        parts = [f"# Your role: {self.name}\n\n{self.description}"]
+        if self.prompt_name:
+            parts.append(load_prompt(self.prompt_name))
+        reference = self._static_reference()
+        if reference:
+            parts.append(reference)
+        return "\n\n".join(parts)
+
+    def _static_reference(self) -> str:
+        """Reference data that is the same on every request (cached with the role)."""
+        return ""
+
     @property
     def system_prompt(self) -> str:
-        return (
-            f"You are {self.name}, a specialized AI assistant that is part of Finnie, "
-            f"an AI-powered personal finance education platform. {self.description}\n\n"
-            "IMPORTANT GUIDELINES:\n"
-            "- You provide financial EDUCATION, not personalized financial advice\n"
-            "- Always include appropriate disclaimers when discussing specific investments\n"
-            "- Be clear, jargon-free, and calibrate explanations to the user's knowledge level\n"
-            "- Cite your sources when referencing specific data\n"
-            "- If uncertain about a fact, say so explicitly\n"
-            "- Never recommend specific securities as 'buys' or 'sells'"
-        )
+        """The full stable system text (blocks 1 + 2), for inspection and token counts."""
+        return f"{shared_system_prompt()}\n\n{self.role_prompt}"
 
-    def _build_prompt(self, additional_system: str = "") -> ChatPromptTemplate:
-        system = self.system_prompt
-        if additional_system:
-            system = f"{system}\n\n{additional_system}"
-        # The system text embeds dynamic content (RAG context, live macro data,
-        # user profile) that can contain literal { } — e.g. JSON snippets from
-        # knowledge base articles. With the default f-string template format
-        # those braces are parsed as prompt variables and raise "missing
-        # variables". Escape them so the system text is treated literally. The
-        # {messages} placeholder below is a separate message tuple, unaffected.
-        system = system.replace("{", "{{").replace("}", "}}")
-        return ChatPromptTemplate.from_messages([
-            ("system", system),
-            ("placeholder", "{messages}"),
-        ])
+    def _build_messages(self, state: FinnieState, context: str = "") -> list[BaseMessage]:
+        """System prompt as content blocks, followed by the conversation.
+
+        Built from message objects rather than a ChatPromptTemplate, so text
+        containing literal braces (JSON in articles or data) needs no escaping.
+        """
+        cache = _cache_control()
+        blocks = [
+            _text_block(shared_system_prompt(), cache),
+            _text_block(self.role_prompt, cache),
+        ]
+        # The API rejects empty text blocks, so an agent with no per-request
+        # context sends only the two stable blocks.
+        if context.strip():
+            blocks.append(_text_block(f"# Context for this request\n\n{context.strip()}"))
+        return [SystemMessage(content=blocks), *state.messages]
 
     def _get_user_context_str(self, state: FinnieState) -> str:
         profile = state.user_profile
@@ -80,28 +125,57 @@ class BaseAgent(ABC):
         """Process the state and return updated state dict."""
         ...
 
-    def _invoke_llm(self, state: FinnieState, additional_system: str = "") -> str:
-        """Helper to invoke the LLM with retry on transient connection errors.
+    # ── LLM call ─────────────────────────────────────────────────────────────
+
+    def _check_cache_active(self, usage: dict[str, int]) -> None:
+        """Warn once per agent when caching is on but the API cached nothing.
+
+        Neither a read nor a write means the stable prefix was not cached at
+        all — usually because it is below the model's minimum cacheable length
+        (1,024 tokens on Claude Sonnet 5). The request still succeeds, so this
+        log is the only signal.
+        """
+        if not usage or _cache_control() is None or self.name in _CACHE_INACTIVE_WARNED:
+            return
+        if usage["cache_read_input_tokens"] == 0 and usage["cache_creation_input_tokens"] == 0:
+            _CACHE_INACTIVE_WARNED.add(self.name)
+            self._logger.warning(
+                "prompt_cache_inactive",
+                agent=self.name,
+                input_tokens=usage["input_tokens"],
+                hint="stable system prompt is likely below the model's minimum cacheable length",
+            )
+
+    def _invoke_llm(self, state: FinnieState, context: str = "") -> str:
+        """Invoke the LLM with retry on transient connection errors.
+
+        `context` is this request's volatile content (user profile, retrieved
+        passages, live data); it is placed after the cached prompt blocks.
 
         Metrics emitted (structured logs → GCP log-based metrics):
-          llm_call_success  — successful invocation (fields: agent, attempt, latency_ms)
+          llm_call_success  — successful invocation (fields: agent, attempt, latency_ms,
+                              input_tokens, cache_read_input_tokens,
+                              cache_creation_input_tokens, output_tokens)
           llm_call_retry    — retrying after a connection error (fields: agent, attempt, retry_in_seconds, error)
           llm_call_failed   — all retries exhausted or non-retryable error (fields: agent, attempt, error_type, error)
+          prompt_cache_inactive — caching enabled but nothing cached (once per agent)
         """
-        prompt = self._build_prompt(additional_system)
-        chain = prompt | self._llm
+        messages = self._build_messages(state, context)
 
         for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
             t0 = time.monotonic()
             try:
-                response = chain.invoke({"messages": state.messages})
+                response = self._llm.invoke(messages)
                 latency_ms = int((time.monotonic() - t0) * 1000)
+                usage = token_usage(response)
                 self._logger.info(
                     "llm_call_success",
                     agent=self.name,
                     attempt=attempt,
                     latency_ms=latency_ms,
+                    **usage,
                 )
+                self._check_cache_active(usage)
                 return message_text(response)
 
             except _RETRYABLE_EXCEPTIONS as exc:

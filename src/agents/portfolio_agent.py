@@ -22,6 +22,7 @@ class PortfolioAgent(BaseAgent):
         "P/E ratios, beta, sector diversification, gain/loss, and provide educational "
         "insights about portfolio health and diversification."
     )
+    prompt_name = "portfolio"
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,7 +52,7 @@ class PortfolioAgent(BaseAgent):
         portfolio_json = json.dumps(portfolio_data, indent=2, default=str) if portfolio_data else "No portfolio data provided."
         sector_json = json.dumps(sector_performance.get("one_day", {}), indent=2) if sector_performance and "error" not in sector_performance else "{}"
 
-        additional_system = f"""
+        context = f"""
 {self._get_user_context_str(state)}
 
 PORTFOLIO DATA:
@@ -59,19 +60,9 @@ PORTFOLIO DATA:
 
 MARKET SECTOR PERFORMANCE (1-day):
 {sector_json}
-
-Analyze the portfolio and provide:
-1. Overall portfolio performance summary (total value, gain/loss, %)
-2. Diversification analysis (sectors represented, concentration risks)
-3. Risk assessment (weighted beta, income vs. growth balance)
-4. Educational insights about what these metrics mean
-5. Suggestions for improving diversification (educational, not personalized advice)
-
-If no portfolio was provided, ask the user to share their holdings in the format:
-TICKER: shares @ avg_cost (e.g., "AAPL: 10 shares @ $150")
 """
 
-        response_text = self._invoke_llm(state, additional_system)
+        response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
         updated_financial_data = state.financial_data.model_copy()

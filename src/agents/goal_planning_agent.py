@@ -63,6 +63,7 @@ class GoalPlanningAgent(BaseAgent):
         "or financial independence. I provide projections based on your risk tolerance, "
         "time horizon, and current economic conditions."
     )
+    prompt_name = "goal_planning"
 
     def __init__(self) -> None:
         super().__init__()
@@ -80,7 +81,7 @@ class GoalPlanningAgent(BaseAgent):
         # Build projection examples
         projections = self._build_projection_examples(annual_return, profile.risk_tolerance)
 
-        additional_system = f"""
+        context = f"""
 {self._get_user_context_str(state)}
 
 CURRENT ECONOMIC ENVIRONMENT (from FRED):
@@ -92,18 +93,9 @@ RETURN ASSUMPTIONS FOR {profile.risk_tolerance.upper()} INVESTOR:
 
 PROJECTION EXAMPLES FOR PLANNING PURPOSES:
 {projections}
-
-Help the user with financial goal planning:
-1. If they mention a specific goal (retirement, home, education), calculate time and required savings
-2. Explain how risk tolerance affects achievable outcomes
-3. Discuss how the current interest rate environment affects savings and investment returns
-4. Break down the goal into actionable monthly steps
-5. Mention tax-advantaged accounts appropriate for the goal
-
-Ask clarifying questions if needed: target amount, current savings, monthly contribution ability, timeline.
 """
 
-        response_text = self._invoke_llm(state, additional_system)
+        response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
         return {

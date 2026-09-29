@@ -5,7 +5,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -44,11 +44,21 @@ _load_secrets_from_aws()
 _ROOT = Path(__file__).parent.parent.parent
 
 
+class PromptCachingConfig(BaseModel):
+    """Anthropic prompt caching on agent system prompts (see src/agents/prompts/)."""
+    enabled: bool = True
+    # "5m" writes at 1.25x input price, "1h" at 2x; reads are ~0.1x on both.
+    # 5m is strictly cheaper while requests sharing the prefix start < 5 min
+    # apart (every read refreshes the timer); 1h only pays off for gaps of 5-60 min.
+    ttl: Literal["5m", "1h"] = "5m"
+
+
 class LLMConfig(BaseModel):
     provider: str = "anthropic"
     model: str = "claude-sonnet-5"
     temperature: float = 0.1  # only applied to models that accept sampling params (see llm.py)
     max_tokens: int = 4096
+    prompt_caching: PromptCachingConfig = PromptCachingConfig()
 
 
 class EmbeddingsConfig(BaseModel):

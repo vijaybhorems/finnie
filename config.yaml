@@ -11,6 +11,12 @@ llm:
   # sampling params (400). Kept for reference / legacy models only. See src/core/llm.py.
   temperature: 0.1
   max_tokens: 4096
+  prompt_caching:
+    # Caches each agent's stable system prompt (shared core + role) on
+    # Anthropic's side. Claude Sonnet 5 only caches prefixes >= 1,024 tokens;
+    # a shorter one silently doesn't cache (logged as prompt_cache_inactive).
+    enabled: true
+    ttl: "5m"   # "5m" (write 1.25x) or "1h" (write 2x) — see PromptCachingConfig
 
 embeddings:
   model: "all-MiniLM-L6-v2"

@@ -21,6 +21,7 @@ class FinanceQAAgent(BaseAgent):
         "stocks, bonds, ETFs, diversification, and macroeconomic principles in clear, "
         "accessible language for all knowledge levels."
     )
+    prompt_name = "finance_qa"
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,7 +52,7 @@ class FinanceQAAgent(BaseAgent):
             else "Not fetched — this question does not depend on current macro readings."
         )
 
-        additional_system = f"""
+        context = f"""
 {self._get_user_context_str(state)}
 
 KNOWLEDGE BASE CONTEXT (use this to ground your answer):
@@ -59,13 +60,9 @@ KNOWLEDGE BASE CONTEXT (use this to ground your answer):
 
 CURRENT MACROECONOMIC DATA (reference if relevant):
 {macro_str}
-
-Answer the user's financial question comprehensively but concisely.
-Adapt your explanation depth to their knowledge level.
-Always cite sources (knowledge base articles or FRED data) when relevant.
 """
 
-        response_text = self._invoke_llm(state, additional_system)
+        response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
         return {

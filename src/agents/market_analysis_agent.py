@@ -22,6 +22,7 @@ class MarketAnalysisAgent(BaseAgent):
         "I provide real-time market analysis including stock quotes, technical indicators "
         "(RSI, MACD), sector performance, and market trend education."
     )
+    prompt_name = "market_analysis"
 
     # Major indices to always include in snapshot
     INDEX_TICKERS = ["SPY", "QQQ", "IWM", "DIA"]
@@ -69,7 +70,7 @@ class MarketAnalysisAgent(BaseAgent):
         sector_json = json.dumps(sector_data.get("one_day", {}), indent=2) if sector_data and "error" not in sector_data else "{}"
         tech_json = json.dumps(technical_data, indent=2, default=str) if technical_data else "No specific tickers requested."
 
-        additional_system = f"""
+        context = f"""
 {self._get_user_context_str(state)}
 
 MARKET INDEX SNAPSHOT (current):
@@ -80,17 +81,9 @@ SECTOR PERFORMANCE (1-day):
 
 TECHNICAL ANALYSIS FOR REQUESTED TICKERS:
 {tech_json}
-
-Provide market analysis covering:
-1. Current market conditions summary (based on index data)
-2. Notable sector movements (if any)
-3. Technical analysis for any requested tickers (explain RSI, trends in plain language)
-4. Educational context: what does today's market environment mean for different investor types?
-
-Explain technical indicators (RSI, moving averages) educationally for beginners.
 """
 
-        response_text = self._invoke_llm(state, additional_system)
+        response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
         updated_financial_data = state.financial_data.model_copy()

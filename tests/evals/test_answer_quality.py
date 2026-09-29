@@ -188,24 +188,22 @@ class TestTaxAgentAnswerQuality:
         )
 
     def test_tax_data_2024_injected(self, retriever):
-        """The 2024 tax reference data should be injected into the LLM context."""
+        """The 2024 tax reference data should reach the LLM.
+
+        It is static, so it lives in the agent's cached role block of the
+        system prompt rather than the per-request context that _invoke_llm
+        receives — assert on the full message list the LLM is sent.
+        """
         with patch("src.agents.tax_education_agent.get_retriever", return_value=retriever), \
-             patch("src.agents.base_agent.get_llm"), \
-             patch.object(
-                 __import__("src.agents.base_agent", fromlist=["BaseAgent"]).BaseAgent,
-                 "_invoke_llm",
-                 _echo_invoke_llm,
-             ):
+             patch("src.agents.base_agent.get_llm"):
 
             from src.agents.tax_education_agent import TaxEducationAgent
             agent = TaxEducationAgent()
-            state = _make_state("What are the 2024 tax brackets?")
-            result = agent.run(state)
+            messages = agent._build_messages(_make_state("What are the 2024 tax brackets?"))
 
-        # The echo returns the additional_system which should include tax data
-        response = result["final_response"]
-        assert "23000" in response or "401k" in response.lower(), (
-            "2024 tax reference data (e.g., 401k limit $23,000) should be in context"
+        system_text = "".join(block["text"] for block in messages[0].content)
+        assert "23000" in system_text, (
+            "2024 tax reference data (e.g., 401k limit $23,000) should be in the system prompt"
         )
 
 

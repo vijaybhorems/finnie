@@ -1,6 +1,7 @@
 """Tax Education Agent — explains tax concepts and account types."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -57,10 +58,16 @@ class TaxEducationAgent(BaseAgent):
         "tax-advantaged accounts (401k, IRA, HSA, 529), tax-loss harvesting, "
         "and how to invest tax-efficiently. I use official IRS data and guidelines."
     )
+    prompt_name = "tax_education"
 
     def __init__(self) -> None:
         super().__init__()
         self._retriever = get_retriever()
+
+    def _static_reference(self) -> str:
+        # Identical on every request, so it belongs in the cached role block
+        # rather than the per-request context.
+        return f"2024 TAX REFERENCE DATA:\n{json.dumps(TAX_DATA_2024, indent=2)}"
 
     def run(self, state: FinnieState) -> dict[str, Any]:
         self._logger.info("tax_education_agent_running")
@@ -74,34 +81,14 @@ class TaxEducationAgent(BaseAgent):
             # Fall back to general retrieval
             rag_context = self._retriever.get_context(query, top_k=3)
 
-        import json
-        tax_json = json.dumps(TAX_DATA_2024, indent=2)
-
-        additional_system = f"""
+        context = f"""
 {self._get_user_context_str(state)}
-
-2024 TAX REFERENCE DATA:
-{tax_json}
 
 KNOWLEDGE BASE CONTEXT:
 {rag_context if rag_context else "No specific articles found for this query."}
-
-IMPORTANT TAX DISCLAIMER:
-You are providing general tax EDUCATION only. Tax situations are highly individual.
-Always direct users to consult a qualified tax professional (CPA or tax attorney) for
-personalized tax advice.
-
-Provide tax education covering:
-1. Answer the specific tax question clearly with 2024 data
-2. Explain the underlying concept (WHY these rules exist)
-3. Walk through a concrete example with numbers
-4. Highlight common mistakes investors make in this area
-5. Suggest related topics they should learn about
-
-Avoid: Giving specific tax advice for their situation. Always include "consult a tax professional" reminder.
 """
 
-        response_text = self._invoke_llm(state, additional_system)
+        response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
         return {

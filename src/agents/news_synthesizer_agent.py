@@ -22,6 +22,7 @@ class NewsSynthesizerAgent(BaseAgent):
         "headlines, earnings reports, and economic events might affect markets and portfolios — "
         "from an educational perspective."
     )
+    prompt_name = "news_synthesizer"
 
     def __init__(self) -> None:
         super().__init__()
@@ -56,7 +57,7 @@ class NewsSynthesizerAgent(BaseAgent):
             if news:
                 ticker_news_text += f"\n\n{ticker} News:\n" + self._format_headlines(news)
 
-        additional_system = f"""
+        context = f"""
 {self._get_user_context_str(state)}
 
 LATEST FINANCIAL HEADLINES:
@@ -67,18 +68,9 @@ RECENT SEC FILINGS (8-K Events):
 
 PORTFOLIO-SPECIFIC NEWS:
 {ticker_news_text if ticker_news_text else "No portfolio holdings to track."}
-
-Synthesize the news for this investor:
-1. Identify the 2-3 most significant stories and why they matter
-2. Explain market implications in plain language
-3. Connect news to broader economic context (interest rates, inflation, growth)
-4. If relevant to their portfolio, highlight potential impact (educational framing)
-5. Help them distinguish signal from noise in financial media
-
-Keep the tone educational — help them develop financial news literacy.
 """
 
-        response_text = self._invoke_llm(state, additional_system)
+        response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
         updated_financial_data = state.financial_data.model_copy()

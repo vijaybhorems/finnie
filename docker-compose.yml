@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────
 # Finnie — AI Finance Assistant
 # All services share a single bridge network.
@@ -28,7 +26,7 @@ services:
   # ── RAG indexer (one-shot job to build FAISS index) ────
   rag_indexer:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
     container_name: finnie_rag_indexer
     command: >
@@ -43,7 +41,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     env_file:
-      - ../.env
+      - .env
     volumes:
       - rag_index:/app/data/faiss_index
     depends_on:
@@ -55,7 +53,7 @@ services:
   # ── Streamlit web application ──────────────────────────
   app:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
     container_name: finnie_app
     ports:
@@ -64,7 +62,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     env_file:
-      - ../.env
+      - .env
     volumes:
       - rag_index:/app/data/faiss_index
     depends_on:

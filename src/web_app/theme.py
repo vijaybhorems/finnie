@@ -28,9 +28,13 @@ LOGO_SVG = """
 _CSS = """
 <style>
 /* ── Chrome ─────────────────────────────────────────────────────────────── */
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
+/* Hide the menu and toolbar actions but keep the header itself: it holds the
+   button that opens the sidebar once it's collapsed, which is always the case
+   on a phone. Collapsing the header hid that button and stranded mobile users. */
+#MainMenu, footer, [data-testid="stMainMenu"], [data-testid="stToolbarActions"],
+[data-testid="stAppDeployButton"], [data-testid="stDecoration"],
 [data-testid="stStatusWidget"] { display: none !important; }
-header[data-testid="stHeader"] { background: transparent; height: 0; }
+header[data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 3rem; padding-bottom: 6rem; max-width: 1080px; }
 h1, h2, h3 { letter-spacing: -0.02em; }
 
@@ -118,6 +122,35 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .block-container h3 { font-size: 1.2rem; font-weight: 650; padding-top: .6rem; }
 [data-testid="stExpander"] details { border-radius: .8rem; }
 [data-testid="stPopover"] button p { white-space: nowrap; }
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+/* The tab bar is for phones only; wider screens keep the sidebar open. */
+[data-testid="stVerticalBlockBorderWrapper"]:has(> .st-key-fn-mobile-nav) { display: none; }
+@media (max-width: 767px) {
+  /* A solid header, so content scrolls under it rather than behind the ☰ button. */
+  header[data-testid="stHeader"] { background: #fff; }
+  .block-container { padding: 3.5rem 1rem 7rem; }
+  /* Sticky goes on Streamlit's wrapper: it's the box that spans the page. */
+  [data-testid="stVerticalBlockBorderWrapper"]:has(> .st-key-fn-mobile-nav) {
+    display: block; position: sticky; top: 3.75rem; z-index: 99;
+    background: #fff; padding: .25rem 0 .5rem;
+  }
+  .st-key-fn-mobile-nav [data-testid="stButtonGroup"] > div { display: flex; flex-wrap: nowrap; width: 100%; max-width: none; }
+  /* Four equal tabs. Streamlit's button styles ignore flex-grow here, so size by min-width. */
+  .st-key-fn-mobile-nav button { flex: 1 1 0; min-width: 25%; max-width: none; padding: .45rem .25rem; }
+  .st-key-fn-mobile-nav button p { font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fn-hello { font-size: 1.5rem; margin-top: .5rem; }
+  .fn-sub { font-size: .95rem; margin-bottom: 1.1rem; }
+  .fn-head { margin-bottom: 1rem; }
+  .fn-head-icon { width: 2.4rem; height: 2.4rem; font-size: 1.1rem; }
+  .fn-head-title { font-size: 1.35rem; }
+  .fn-head-sub { font-size: .88rem; }
+  .st-key-fn-prompts button { min-height: 3.2rem; }
+  [data-testid="stChatMessage"] { padding: .7rem .75rem; gap: .6rem; }
+  [data-testid="stMetricValue"] { font-size: 1.25rem; }
+  /* 16px inputs stop iOS Safari zooming the page when a field gets focus. */
+  input, textarea, [data-baseweb="select"] { font-size: 16px !important; }
+}
 </style>
 """
 

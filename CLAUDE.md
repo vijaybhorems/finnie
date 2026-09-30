@@ -16,6 +16,8 @@ pip install -r requirements.txt
 # Knowledge base — pgvector (when DATABASE_URL is set): synced automatically at app startup;
 # run by hand to apply an article edit without restarting. Idempotent, embeds only changed chunks.
 python -m src.rag.sync
+# Database (with DATABASE_URL): LangGraph tables + pgvector schema + KB sync; the container runs this before serving
+python -m src.persistence.migrate
 # Knowledge base — FAISS (no DATABASE_URL): build before first run, force-rebuild after editing src/data/knowledge_base/
 python -c "from src.rag.indexer import RAGIndexer; RAGIndexer().build_index()"
 python -c "from src.rag.indexer import RAGIndexer; RAGIndexer().build_index(force=True)"  # force rebuild
@@ -31,8 +33,9 @@ pytest --no-cov                       # faster, no coverage
 
 # Evals — NOT run in CI; build a real FAISS index and some hit the live Anthropic API
 pytest tests/evals -v
+FINNIE_EVAL_LIVE=1 pytest tests/evals/test_memory_evals.py -v -s          # real extraction + recall across sessions (a few cents)
 FINNIE_EVAL_LIVE=1 pytest tests/evals/test_prompt_cache_evals.py -v -s   # proves prompt caching hits (reads real key from .env)
-FINNIE_TEST_DATABASE_URL=postgresql://user@localhost:5432/finnie_test pytest tests/test_persistence.py tests/test_rag_pgvector.py   # persistence, isolation, pgvector on real Postgres (a DISPOSABLE db: tests truncate tables) (memory-only otherwise)
+FINNIE_TEST_DATABASE_URL=postgresql://user@localhost:5432/finnie_test pytest tests/test_persistence.py tests/test_rag_pgvector.py tests/test_memory.py   # persistence, isolation, pgvector on real Postgres (a DISPOSABLE db: tests truncate tables) (memory-only otherwise)
 FINNIE_TEST_DATABASE_URL=postgresql://user@localhost:5432/finnie_test pytest tests/evals/test_rag_backend_parity.py -s   # pgvector vs FAISS retrieval quality (real model)
 python scripts/run_phoenix_evals.py --routing   # LLM-judge router accuracy
 python scripts/run_phoenix_evals.py --quality   # LLM-judge answer quality
@@ -41,13 +44,17 @@ python scripts/run_phoenix_evals.py --all
 # Local Phoenix tracing UI (optional; tracing is off unless config.yaml/env enables it)
 phoenix serve   # UI on :6006, OTLP gRPC receiver on :4317
 
+# Google Cloud — one-time provisioning wizard (Cloud SQL, runtime SA, secrets, permissions), then build + deploy
+deploy/setup_gcp.sh
+gcloud builds submit --config cloudbuild.yaml --substitutions=_RUNTIME_SA=...,_CLOUDSQL_INSTANCE=...   # exact command saved in deploy/.gcp.env
+
 # Docker Compose (Redis, Postgres+pgvector, then the app — which syncs the knowledge base at startup)
 docker compose up --build
 ```
 
 There is no configured linter/formatter (no ruff/black/mypy config) — `pyrightconfig.json` sets `basic` type-checking mode only.
 
-Tests auto-mock required env vars and clear LRU-cached singletons (`get_settings`, `get_llm`, `build_graph`, circuit breakers, persistence backends) between tests via autouse fixtures in `tests/conftest.py` — no manual cache-clearing needed when writing new tests. `conftest.py` sets `DATABASE_URL=""` so the suite always uses the in-memory backend, even when a developer's `.env` points at a real database.
+Tests auto-mock required env vars and clear LRU-cached singletons (`get_settings`, `get_llm`, `build_graph`, circuit breakers, persistence backends) between tests via autouse fixtures in `tests/conftest.py` — no manual cache-clearing needed when writing new tests. `conftest.py` sets `DATABASE_URL=""` so the suite always uses the in-memory backend, even when a developer's `.env` points at a real database, and swaps the store's embedding function for a deterministic `hash_embed` (every turn searches memories; without it each test would load the real model). Mark a test `@pytest.mark.real_embeddings` to opt out.
 
 ## Architecture
 
@@ -73,6 +80,12 @@ The graph shape is controlled by two independently reversible flags under `fast_
   - **Per-turn reset**: on a checkpointed thread every `FinnieState` field except `messages` carries into the next turn. `turn_state_reset()` (built from the model's defaults) is applied to each turn's input — add new fields to `FinnieState` with sensible defaults and they are reset automatically; never compute per-turn values that rely on the previous turn's state.
   - Agents send at most `workflow.max_history_messages` of history (`trim_history`, window always opens on a user turn); the full thread stays in the checkpoint. Guardrail refusals are appended to `messages` so a refused question is never left unanswered in history.
   - Pages save only on a real change or an explicit button (`save_if_changed`) — the Portfolio tab's example holdings and the Goals timeline's defaults are never saved as a user's own. Holdings are sanitised on write (`clean_holdings`): Postgres `jsonb` rejects the `NaN` that `st.data_editor` returns for blank cells.
+- **Memory** (`src/memory/`, `memory` in `config.yaml`): durable facts users state in chat ("saving for a house deposit, target 2028"), recalled in later sessions.
+  - **Write path**: after each on-topic chat turn, `chat.py` calls `schedule_remember_turn()` — a background thread, so the answer never waits. `extract_facts()` skips the model entirely unless the message has a first-person word, asks for structured facts (goal/situation/preference/constraint + confidence), and `remember_turn()` keeps only confidence ≥ `min_confidence` and drops anything `is_sensitive()` flags (account/card/SSN-like digit runs, emails, passwords) — a deterministic backstop to the prompt's exclusions. A fact nearly identical (`dedup_similarity`) to an existing one in the same category replaces it.
+  - **Storage**: `UserData.remember/forget/forget_all/list_memories/relevant_memories`, one store item per fact in `("users", <id>, "memories")`, semantically indexed on `fact` with exact (`flat`) search. Only memory items are indexed — other `UserData` writes pass `index=False` and never embed. Deletes are real store deletes (the vector row cascades).
+  - **Read path**: hydrate adds the `top_k` memories relevant to the question to `user_profile.memories`; `BaseAgent._get_user_context_str` puts them, dated, in the per-request context block (never the cached blocks).
+  - **Privacy rules — keep them**: `faq_cache_write` never stores an answer produced with memories, because the FAQ cache is shared by every user. The user's switch (`memory_enabled`) stops both saving and recall. The sidebar panel (`src/web_app/memory_panel.py`) lists, deletes, and forgets everything.
+- **Deployment** (Cloud Run + Cloud SQL; README "Deploying to Google Cloud Run"): `docker/entrypoint.sh` runs `python -m src.persistence.migrate` before Streamlit when `DATABASE_URL` is set, so a revision with a broken database never takes traffic. `migrate` takes its lock with a polling `pg_try_advisory_lock`, **never a blocking `pg_advisory_lock`**: LangGraph's store setup runs `CREATE INDEX CONCURRENTLY`, which waits for every open transaction, so a waiter blocked inside a lock statement deadlocks it (reproduced with 4 concurrent migrations on a fresh database). `cloudbuild.yaml` deploys an immutable `:$BUILD_ID` image with `gcloud run deploy`, which merges into the live service — unnamed settings (VPC connector, env vars, other secrets) carry over. `env-vars.yaml` is git-ignored (email allowlist); an empty `ALLOWED_EMAILS` lets any Google account in.
 - **State** (`FinnieState`) is the single object threaded through every node: conversation `messages` (LangGraph-managed via `add_messages`), routing fields, guardrail verdict (`is_on_topic`), `UserProfile`, `FinancialData` payload, `rag_context`, and `final_response`.
 - **Config** (`src/core/config.py`): `get_settings()` is an `lru_cache`d singleton merging `config.yaml` (nested `LLMConfig`/`RAGConfig`/`CircuitBreakerConfig`/`GuardrailConfig`/`TracingConfig`/`PlanningConfig`/etc.) with env vars from `.env` (API keys, Redis host/port, Phoenix endpoint/key). If `AWS_SECRETS_NAME` is set, secrets are pulled from AWS Secrets Manager into the env *before* Settings loads (production path; local dev just uses `.env`). Env vars generally win over YAML (see Redis/Phoenix override logic at the bottom of `get_settings()`).
 - **Resilience**: each external data client (`src/data/{yfinance,alpha_vantage,fred,news}_client.py`) is wrapped in its own circuit breaker (`src/utils/circuit_breaker.py`) — opens after `failure_threshold` consecutive failures, stays open `recovery_timeout_seconds`, then allows one half-open probe. Caching (`src/utils/cache.py`, Redis with in-memory fallback) sits in front of these clients: 5 min for market data, 1 hour for macro, 24 hours for fundamentals.

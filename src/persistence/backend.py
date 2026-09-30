@@ -91,17 +91,48 @@ def get_checkpointer() -> BaseCheckpointSaver:
     return saver
 
 
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embedding function for the store's semantic index (the shared MiniLM model).
+
+    A module-level function so tests can substitute a deterministic embedder
+    before the store is built.
+    """
+    from src.core.embeddings import embed
+
+    return embed(texts).tolist()
+
+
+def _index_config() -> dict[str, Any]:
+    """Semantic index over memories (items with a "fact" field).
+
+    "flat" = exact search, no ANN index (LangGraph's default is HNSW). Every
+    user's memories share one table, filtered by namespace. An approximate
+    index could in principle rank globally and filter afterwards, dropping a
+    user's own memories; with LangGraph's current query (namespace filter on
+    the store's primary key, joined to the vectors) the planner doesn't do
+    that — we checked, including with sequential scans disabled. Exact search
+    guarantees it whatever plan is chosen, and costs nothing at per-user
+    volumes (a user has at most `memory.max_memories_per_user` rows).
+    """
+    return {
+        "dims": get_settings().embeddings.dimension,
+        "embed": lambda texts: embed_texts(texts),
+        "fields": ["fact"],
+        "ann_index_config": {"kind": "flat"},
+    }
+
+
 @lru_cache(maxsize=1)
 def get_store() -> BaseStore:
-    """Key-value store for per-user data."""
+    """Key-value store for per-user data, with a semantic index for memories."""
     if backend_name() == "memory":
         _warn_memory_backend("store")
-        return InMemoryStore()
+        return InMemoryStore(index=_index_config())
 
     from langgraph.store.postgres import PostgresStore
 
-    store = PostgresStore(get_pool())
-    store.setup()  # idempotent: creates or migrates the store tables
+    store = PostgresStore(get_pool(), index=_index_config())
+    store.setup()  # idempotent: creates or migrates the store (and vector) tables
     return store
 
 

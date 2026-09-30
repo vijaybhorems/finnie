@@ -1,14 +1,79 @@
-# Cloud Build config for the Finnie Streamlit app.
-# The Dockerfile lives in docker/ but its build context is the repo root,
-# so we build with `-f docker/Dockerfile .`.
+# Cloud Build: build, push, and deploy Finnie to Cloud Run.
+#
+#   gcloud builds submit --config cloudbuild.yaml .
+#
+# One-time setup (Cloud SQL, runtime service account, secrets, permissions) is
+# done by deploy/setup_gcp.sh, which also writes the substitutions below into
+# deploy/.gcp.env and prints the exact submit command.
+#
+# `gcloud run deploy` merges into the existing service: settings not given here
+# (VPC connector, other secrets and env vars such as ALLOWED_EMAILS and
+# AUTH_REDIRECT_URI, IAM) carry over from the current revision unchanged.
+substitutions:
+  _REGION: us-central1
+  _SERVICE: finnie-app
+  _REPO: finnie
+  _IMAGE_NAME: finnie-app
+  _RUNTIME_SA: ""          # finnie-run@<project>.iam.gserviceaccount.com
+  _CLOUDSQL_INSTANCE: ""   # <project>:<region>:<instance>
+  _MEMORY: 8Gi
+  _CPU: "2"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
 steps:
-  - name: gcr.io/cloud-builders/docker
+  # Fail in seconds, not after a ten-minute build, if setup hasn't been done.
+  - id: check
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -eu
+        [ -n "${_RUNTIME_SA}" ] || { echo "_RUNTIME_SA is empty: run deploy/setup_gcp.sh first"; exit 1; }
+        [ -n "${_CLOUDSQL_INSTANCE}" ] || { echo "_CLOUDSQL_INSTANCE is empty: run deploy/setup_gcp.sh first"; exit 1; }
+
+  - id: build
+    name: gcr.io/cloud-builders/docker
     args:
       - build
-      - -t
-      - us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest
       - -f
       - docker/Dockerfile
+      # Immutable per-build tag (what gets deployed, so every revision can be
+      # rolled back to by tag) plus :latest for convenience.
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:$BUILD_ID
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:latest
       - .
-images:
-  - us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest
+
+  # Push before deploying: images listed under `images:` are only pushed after
+  # every step, which would be too late for the deploy step.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}"]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:$BUILD_ID
+      - --region=${_REGION}
+      - --port=8501
+      - --memory=${_MEMORY}
+      - --cpu=${_CPU}
+      - --cpu-boost
+      # Streamlit holds a websocket per session; the 300s default cuts it every
+      # five minutes. Affinity keeps a reconnecting browser on its instance.
+      - --timeout=3600
+      - --session-affinity
+      # Least-privilege runtime identity instead of the default compute SA.
+      - --service-account=${_RUNTIME_SA}
+      # Cloud SQL via the built-in connector: a Unix socket at /cloudsql/<instance>.
+      - --add-cloudsql-instances=${_CLOUDSQL_INSTANCE}
+      - --update-secrets=DATABASE_URL=DATABASE_URL:latest

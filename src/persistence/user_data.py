@@ -12,6 +12,12 @@ Layout in the LangGraph store, namespace ("users", <user_id>):
   plan      {start_age, horizon, current_savings, monthly_contribution,
              risk_tolerance, events: [...]}          (Goals → Life Timeline)
   session   {active_thread_id}                       (current chat thread)
+  settings  {memory_enabled}                         (user's memory switch)
+
+Memories live one level down, in ("users", <user_id>, "memories"), one item
+per fact, semantically indexed on "fact" so the relevant few can be recalled
+per question. Only memory items are indexed; everything above is written with
+index=False and never pays for an embedding.
 
 Values are sanitised on write: Postgres jsonb rejects NaN, which is exactly
 what st.data_editor returns for a half-filled row.
@@ -20,10 +26,12 @@ from __future__ import annotations
 
 import math
 import uuid
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from langgraph.store.base import BaseStore
 
+from src.core.config import get_settings
 from src.core.state import UserProfile
 from src.persistence.backend import get_store
 
@@ -103,7 +111,7 @@ class UserData:
         return item.value if item else None
 
     def _put(self, key: str, value: dict[str, Any]) -> None:
-        self._store.put(self._namespace, key, _json_safe(value))
+        self._store.put(self._namespace, key, _json_safe(value), index=False)
 
     # ── Profile ──────────────────────────────────────────────────────────────
 
@@ -163,6 +171,101 @@ class UserData:
         thread_id = f"{self._thread_prefix()}{uuid.uuid4().hex}"
         self._put("session", {"active_thread_id": thread_id})
         return thread_id
+
+    # ── Memories ─────────────────────────────────────────────────────────────
+
+    @property
+    def _memory_namespace(self) -> tuple[str, str, str]:
+        return ("users", self._user_id, "memories")
+
+    def memory_enabled(self) -> bool:
+        """The user's own switch; on unless they turned it off."""
+        return bool((self._get("settings") or {}).get("memory_enabled", True))
+
+    def set_memory_enabled(self, enabled: bool) -> None:
+        self._put("settings", {**(self._get("settings") or {}), "memory_enabled": bool(enabled)})
+
+    @staticmethod
+    def _is_expired(value: dict[str, Any]) -> bool:
+        expires_on = value.get("expires_on")
+        return bool(expires_on) and str(expires_on) < date.today().isoformat()
+
+    def _live(self, items: list[Any]) -> list[dict[str, Any]]:
+        """Items as memory dicts, deleting any that have expired."""
+        live = []
+        for item in items:
+            if self._is_expired(item.value):
+                self._store.delete(self._memory_namespace, item.key)
+                continue
+            memory = {"id": item.key, **item.value}
+            if getattr(item, "score", None) is not None:
+                memory["relevance"] = float(item.score)
+            live.append(memory)
+        return live
+
+    def list_memories(self) -> list[dict[str, Any]]:
+        """Every live memory, newest first — what the user sees in the panel."""
+        cap = get_settings().memory.max_memories_per_user
+        items = self._store.search(self._memory_namespace, limit=cap * 2)
+        return sorted(self._live(items), key=lambda m: m.get("created_at", ""), reverse=True)
+
+    def relevant_memories(self, query: str, k: Optional[int] = None) -> list[dict[str, Any]]:
+        """The k memories most relevant to `query` (empty if memory is off)."""
+        if not query.strip() or not self.memory_enabled():
+            return []
+        k = k or get_settings().memory.top_k
+        items = self._store.search(self._memory_namespace, query=query, limit=k * 2)
+        return self._live(items)[:k]
+
+    def remember(
+        self,
+        fact: str,
+        category: str,
+        confidence: float,
+        expires_on: Optional[str] = None,
+    ) -> str:
+        """Save a fact, replacing a near-identical one of the same category.
+
+        Returns the memory id. Replacement keeps one current version of a fact
+        ("Is 35" supersedes "Is 34") instead of contradictory copies.
+        """
+        settings = get_settings().memory
+        similar = self._store.search(
+            self._memory_namespace, query=fact, filter={"category": category}, limit=1
+        )
+        replaces = similar and (similar[0].score or 0.0) >= settings.dedup_similarity
+        memory_id = similar[0].key if replaces else uuid.uuid4().hex
+        now = datetime.now(timezone.utc)
+        self._store.put(
+            self._memory_namespace,
+            memory_id,
+            _json_safe({
+                "fact": fact,
+                "category": category,
+                "confidence": float(confidence),
+                "noted_on": now.date().isoformat(),
+                "created_at": now.isoformat(),
+                "expires_on": expires_on,
+            }),
+        )
+        self._enforce_memory_cap()
+        return memory_id
+
+    def _enforce_memory_cap(self) -> None:
+        cap = get_settings().memory.max_memories_per_user
+        memories = self.list_memories()
+        for stale in memories[cap:]:
+            self._store.delete(self._memory_namespace, stale["id"])
+
+    def forget(self, memory_id: str) -> None:
+        """Delete one memory — a real delete, not a flag."""
+        self._store.delete(self._memory_namespace, memory_id)
+
+    def forget_all(self) -> int:
+        memories = self.list_memories()
+        for memory in memories:
+            self._store.delete(self._memory_namespace, memory["id"])
+        return len(memories)
 
     # ── For the workflow ─────────────────────────────────────────────────────
 

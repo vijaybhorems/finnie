@@ -19,6 +19,7 @@ from langgraph.store.base import BaseStore
 from src.core.state import FinnieState
 from src.persistence.user_data import UserData
 from src.utils.logger import get_logger
+from src.workflow.guardrail import _extract_query
 
 logger = get_logger(__name__)
 
@@ -37,9 +38,22 @@ def hydrate_node(
     if not user_id or store is None:
         return {}
     try:
-        profile = UserData(user_id, store).to_user_profile()
+        user_data = UserData(user_id, store)
+        profile = user_data.to_user_profile()
     except Exception as exc:  # noqa: BLE001 — answer without personal context rather than fail
         logger.error("hydrate_failed", error=str(exc), error_type=type(exc).__name__)
         return {}
-    logger.info("hydrate_loaded", holdings=len(profile.portfolio), has_plan=bool(profile.goals))
+
+    # Memories are optional context: a failed recall must not drop the profile.
+    try:
+        profile.memories = user_data.relevant_memories(_extract_query(state))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("memory_recall_failed", error=str(exc), error_type=type(exc).__name__)
+
+    logger.info(
+        "hydrate_loaded",
+        holdings=len(profile.portfolio),
+        has_plan=bool(profile.goals),
+        memories=len(profile.memories),
+    )
     return {"user_profile": profile}

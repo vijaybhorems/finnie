@@ -379,109 +379,69 @@ The exporter protocol is inferred automatically: `https://` endpoints use OTLP o
 
 ## Deploying to Google Cloud Run
 
-The included `docker/Dockerfile` builds directly for Cloud Run, and `cloudbuild.yaml` targets project `finnie-agent`, Artifact Registry repo `finnie` in `us-central1`, image `finnie-app`. Substitute your own project/region/repo throughout if different.
+Finnie runs on **Cloud Run**, with **Cloud SQL for PostgreSQL** (pgvector) behind the database features: saved profiles and holdings, persistent chat history, the pgvector knowledge base, the shared FAQ cache, and long-term memory. Without a database the app still runs, in-memory, and none of that survives a restart.
 
-Two gotchas specific to this app:
-- The container listens on **port 8501** (not Cloud Run's default 8080) — you must pass `--port=8501`.
-- The torch / sentence-transformers stack needs real memory — **512Mi will OOM at startup**. Use at least `--memory=2Gi` (4Gi recommended).
-
-### 0. One-time setup
-
-```bash
-gcloud auth login
-gcloud config set project finnie-agent
-
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com secretmanager.googleapis.com
-
-# Artifact Registry repo (matches the image path in cloudbuild.yaml)
-gcloud artifacts repositories create finnie \
-  --repository-format=docker --location=us-central1 || true
+```
+Cloud Build ── build → push :$BUILD_ID → gcloud run deploy
+                                              │
+Cloud Run (finnie-app, runs as finnie-run@…) ─┼─ Secret Manager  (API keys, OAuth, DATABASE_URL)
+   entrypoint: migrate → streamlit            ├─ Cloud SQL       (Unix socket /cloudsql/…)
+                                              └─ VPC connector   (Memorystore Redis, optional)
 ```
 
-Also create a **Google OAuth 2.0 Client ID** (Web application) in the [Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) — the app can't render without it. You'll fill in its redirect URI in step 4 once you know the Cloud Run URL.
+### One-time setup
 
-### 1. Store secrets in Secret Manager
-
-The app reads `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_SECRET`, and `AUTH_COOKIE_SECRET` — keep these out of plain env vars.
+Prerequisites: `gcloud auth login`, the existing service and its secrets (API keys, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `AUTH_COOKIE_SECRET`), and a Google OAuth client whose redirect URI is `https://<service-url>/oauth2callback`.
 
 ```bash
-printf 'sk-ant-...' | gcloud secrets create anthropic-api-key --data-file=-
-printf 'GOCSPX-...' | gcloud secrets create google-client-secret --data-file=-
-python -c "import secrets; print(secrets.token_hex(32))" \
-  | gcloud secrets create auth-cookie-secret --data-file=-
-
-# Grant the Cloud Run runtime service account read access
-PROJECT_NUM=$(gcloud projects describe finnie-agent --format='value(projectNumber)')
-SA="${PROJECT_NUM}-compute@developer.gserviceaccount.com"
-for s in anthropic-api-key google-client-secret auth-cookie-secret; do
-  gcloud secrets add-iam-policy-binding $s \
-    --member="serviceAccount:$SA" --role="roles/secretmanager.secretAccessor"
-done
+deploy/setup_gcp.sh
 ```
 
-### 2. Build & push the image
+The wizard walks through seven stages, checks what already exists at each (safe to re-run), and asks before anything billed or disruptive:
 
-The `docker/Dockerfile` already bakes both the embedding model and the FAISS index into the image, so cold-started containers never rebuild the index on the first query — no extra step needed.
+1. Project, region, APIs.
+2. A least-privilege runtime service account (`finnie-run`), replacing the default compute account, which usually holds Editor.
+3. A Cloud SQL PostgreSQL 16 instance — `db-g1-small` by default, daily backups, deletion protection. Billed.
+4. The `finnie` database and user, and a `DATABASE_URL` secret. The password is generated and goes straight into Secret Manager — never shown or written to disk.
+5. Secret access for the runtime account: every secret the service already uses, plus `DATABASE_URL`.
+6. Cloud Build permission to deploy revisions that run as `finnie-run`.
+7. The first build and deploy.
+
+Non-secret choices are saved to `deploy/.gcp.env` (git-ignored), including the exact deploy command.
+
+### Deploying
 
 ```bash
-gcloud builds submit --config cloudbuild.yaml .
-# → us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_RUNTIME_SA=finnie-run@finnie-agent.iam.gserviceaccount.com,_CLOUDSQL_INSTANCE=finnie-agent:us-central1:finnie-db .
 ```
 
-### 3. Deploy to Cloud Run
+`cloudbuild.yaml` builds the image, pushes it with an immutable `:$BUILD_ID` tag (plus `:latest`), and deploys that tag. `gcloud run deploy` **merges** into the existing service, so settings it doesn't name — the VPC connector, other secrets, env vars such as `ALLOWED_EMAILS` — carry over unchanged. It sets:
+
+- `--timeout=3600` and `--session-affinity` — Streamlit keeps a websocket per session; the 300s default cuts it every five minutes.
+- `--service-account=finnie-run@…` and `--add-cloudsql-instances` — Cloud SQL is reached through the built-in connector as a Unix socket at `/cloudsql/<connection-name>`.
+- `--memory=8Gi --cpu=2 --cpu-boost` — the torch / sentence-transformers stack OOMs at 512Mi. Override with `_MEMORY` / `_CPU`.
+
+**Migrations run before traffic.** The container entrypoint (`docker/entrypoint.sh`) runs `python -m src.persistence.migrate` — LangGraph tables, pgvector schema, knowledge-base sync — before Streamlit listens. If the database is unreachable the new revision never becomes ready and **the previous revision keeps serving**. Several instances starting at once are serialised by an advisory lock.
+
+**Rollback:** `gcloud run services update-traffic finnie-app --region=us-central1 --to-revisions=<previous-revision>=100`, or redeploy an earlier `:$BUILD_ID` image.
+
+### Environment variables
+
+Plain settings live on the service; secrets live in Secret Manager. `env-vars.yaml` is git-ignored because it holds the email allowlist — start from `env-vars.example.yaml`:
 
 ```bash
-gcloud run deploy finnie-app \
-  --image=us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest \
-  --region=us-central1 \
-  --port=8501 \
-  --memory=4Gi --cpu=2 --cpu-boost \
-  --allow-unauthenticated \
-  --session-affinity \
-  --update-secrets=ANTHROPIC_API_KEY=anthropic-api-key:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,AUTH_COOKIE_SECRET=auth-cookie-secret:latest \
-  --update-env-vars=GOOGLE_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com,ALLOWED_EMAILS=you@example.com
+gcloud run services update finnie-app --region=us-central1 --env-vars-file=env-vars.yaml
 ```
 
-- `--allow-unauthenticated` — access control is the app's own Google OAuth, not Cloud Run IAM.
-- `--session-affinity` — Streamlit uses websockets; affinity keeps reconnects on the same instance.
-- `ALLOWED_EMAILS` — omit to allow any authenticated Google account, or set a comma-separated allowlist.
+- `ALLOWED_EMAILS` — comma-separated. **Empty means any Google account can sign in**, so always set it in production.
+- `AUTH_REDIRECT_URI` — `https://<service-url>/oauth2callback`; must match the OAuth client.
+- `REDIS_HOST` / `REDIS_PORT` — optional Memorystore via the VPC connector. The app works without Redis: the FAQ cache moves to Postgres when `DATABASE_URL` is set, and data-client caching falls back to memory.
 
-### 4. Wire up the OAuth redirect (two-pass)
+### Optional
 
-The service URL isn't known until the first deploy, so:
-
-```bash
-URL=$(gcloud run services describe finnie-app --region=us-central1 --format='value(status.url)')
-echo "$URL"
-```
-
-1. In the Google OAuth client, add `${URL}/oauth2callback` to **Authorized redirect URIs** and `${URL}` to **Authorized JavaScript origins**.
-2. Redeploy with the redirect URI so `auth_bootstrap.py` writes the correct `secrets.toml`:
-
-```bash
-gcloud run services update finnie-app --region=us-central1 \
-  --update-env-vars=AUTH_REDIRECT_URI=${URL}/oauth2callback
-```
-
-Open `$URL`, sign in with Google, and you're in.
-
-### 5. Optional add-ons
-
-- **Redis (Memorystore):** not required — the app falls back to an in-memory cache if `REDIS_HOST` is unreachable. Cloud Run reaches a private Memorystore instance only via a [Serverless VPC Access connector](https://cloud.google.com/run/docs/configuring/vpc-connectors); attach it with `--vpc-connector` and set `--update-env-vars=REDIS_HOST=...,REDIS_PORT=6379`.
-- **Phoenix tracing:** add `TRACING_ENABLED=true`, `PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/s/your-space`, and `--update-secrets=PHOENIX_API_KEY=phoenix-api-key:latest` (see [Observability](#observability--arize-phoenix-tracing)).
-- **Avoid cold starts:** `--min-instances=1` keeps one warm instance (the ~11s model load happens once) at the cost of always-on billing.
-
-### Redeploys
-
-Build a new image, then deploy it — use `--update-*` (merge), not `--set-*` (replace-all), so you don't wipe existing env vars/secrets/VPC config:
-
-```bash
-gcloud builds submit --config cloudbuild.yaml .
-gcloud run deploy finnie-app \
-  --image=us-central1-docker.pkg.dev/finnie-agent/finnie/finnie-app:latest \
-  --region=us-central1
-```
+- **Avoid cold starts:** `--min-instances=1` keeps one warm instance, so the ~10s model load happens once. Costs always-on billing.
+- **Phoenix tracing:** set `TRACING_ENABLED=true` and `PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/s/<space>`, and add `--update-secrets=PHOENIX_API_KEY=phoenix-api-key:latest` (see [Observability](#observability--arize-phoenix-tracing)).
 
 ## Evaluation Criteria Coverage
 

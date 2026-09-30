@@ -20,3 +20,7 @@ plans/
 research/
 brainstorm/
 .claude/
+
+# Deployment config with personal data / local provisioning state
+env-vars.yaml
+deploy/.gcp.env

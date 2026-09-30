@@ -93,6 +93,10 @@ def faq_cache_write_node(state: FinnieState) -> dict[str, Any]:
         return {}
     if _used_live_data(state):
         return {}
+    if state.user_profile.memories:
+        # The cache is shared by every user: an answer shaped by this user's
+        # saved facts must never be served to someone else.
+        return {}
 
     query = _extract_query(state)
     response = state.final_response

@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.data.yfinance_client import YFinanceClient
+from src.web_app.markdown import render_safe
 from src.workflow.graph import run_workflow
 
 _MAJOR_INDICES = {
@@ -193,7 +194,7 @@ def _render_ai_market_analysis() -> None:
                 user_message=query,
                 user_profile=st.session_state.get("user_profile"),
             )
-        st.markdown(result["final_response"])
+        st.markdown(render_safe(result["final_response"]))
 
 
 def _format_market_cap(cap) -> str:

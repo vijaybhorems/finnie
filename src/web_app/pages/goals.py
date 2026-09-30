@@ -9,6 +9,7 @@ from src.agents.goal_planning_agent import _project_savings, _RETURN_ASSUMPTIONS
 from src.core.config import get_settings
 from src.planning.life_events import EVENT_TYPES, LifeEvent
 from src.planning.projection_engine import ProjectionInputs, project_timeline, summarize
+from src.web_app.markdown import render_safe
 from src.workflow.graph import run_workflow
 
 
@@ -326,7 +327,7 @@ def _render_life_timeline() -> None:
                 user_message=summary_msg,
                 user_profile=st.session_state.get("user_profile"),
             )
-        st.markdown(result["final_response"])
+        st.markdown(render_safe(result["final_response"]))
 
 
 def _render_ai_goal_planner() -> None:
@@ -352,7 +353,7 @@ def _render_ai_goal_planner() -> None:
                 user_message=custom_goal,
                 user_profile=st.session_state.get("user_profile"),
             )
-        st.markdown(result["final_response"])
+        st.markdown(render_safe(result["final_response"]))
 
 
 def _render_retirement_calculator() -> None:

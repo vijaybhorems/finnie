@@ -5,6 +5,7 @@ import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.core.config import get_settings
+from src.web_app.markdown import render_safe, render_safe_stream
 from src.workflow.graph import run_workflow, stream_workflow
 
 _AGENT_LABELS = {
@@ -51,7 +52,7 @@ def render_chat_page() -> None:
     for msg in st.session_state.messages:
         role = msg["role"]
         with st.chat_message(role, avatar="🧑" if role == "user" else "💹"):
-            st.markdown(msg["content"])
+            st.markdown(render_safe(msg["content"]))
             if role == "assistant" and "agent" in msg:
                 label = _AGENT_LABELS.get(msg["agent"], msg["agent"])
                 reasoning = msg.get("reasoning", "")
@@ -90,15 +91,14 @@ def _run_turn(user_input: str) -> dict:
     # Streaming path: render tokens as they arrive; `sink` receives the full
     # result once the graph finishes.
     sink: dict = {}
+    tokens = stream_workflow(
+        user_message=user_input,
+        conversation_history=st.session_state.lc_messages,
+        user_profile=st.session_state.get("user_profile"),
+        sink=sink,
+    )
     with st.chat_message("assistant", avatar="💹"):
-        st.write_stream(
-            stream_workflow(
-                user_message=user_input,
-                conversation_history=st.session_state.lc_messages,
-                user_profile=st.session_state.get("user_profile"),
-                sink=sink,
-            )
-        )
+        st.write_stream(render_safe_stream(tokens))
     return sink
 
 

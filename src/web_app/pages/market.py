@@ -8,6 +8,7 @@ import streamlit as st
 
 from src.data.yfinance_client import YFinanceClient
 from src.workflow.graph import run_workflow
+from src.web_app.session import current_user_id
 
 _MAJOR_INDICES = {
     "S&P 500": "SPY",
@@ -192,6 +193,7 @@ def _render_ai_market_analysis() -> None:
             result = run_workflow(
                 user_message=query,
                 user_profile=st.session_state.get("user_profile"),
+                user_id=current_user_id(),
             )
         st.markdown(result["final_response"])
 

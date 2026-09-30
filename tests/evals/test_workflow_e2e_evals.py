@@ -1,6 +1,7 @@
 """End-to-end workflow evals for run_workflow.
 
-Validates the full compiled graph (guardrail → router → agent → END), including
+Validates the full compiled graph (classify → agent → END, the default since
+phase 1; the legacy guardrail and router are patched too), including
 the guardrail short-circuit path, using offline stubs.
 
 Run with:
@@ -24,6 +25,22 @@ def _verdict_llm(payload: dict):
     return llm
 
 
+def _classify_llm(**verdict):
+    """Stub for the merged classifier (the default graph since phase 1).
+
+    Without this the classifier makes a real API call: with the suite's fake
+    key it gets a 401 and fails closed, so these tests would pass or fail on
+    network and credentials rather than on the graph's behaviour.
+    """
+    from src.workflow.classify import Verdict
+
+    structured = MagicMock()
+    structured.invoke.return_value = Verdict(**verdict)
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    return lambda **_: llm
+
+
 class TestGuardrailShortCircuit:
     """Off-topic / NSFW queries never reach an agent."""
 
@@ -38,6 +55,9 @@ class TestGuardrailShortCircuit:
         with patch(
             "src.workflow.guardrail.get_llm",
             return_value=_verdict_llm({"on_topic": False, "reason": "cooking"}),
+        ), patch(
+            "src.workflow.classify.get_llm",
+            _classify_llm(on_topic=False, agent="finance_qa", reason="cooking"),
         ):
             from src.workflow.graph import run_workflow
             result = run_workflow("Give me a lasagna recipe")
@@ -55,6 +75,9 @@ class TestInScopeRouting:
         ), patch(
             "src.workflow.router.get_llm",
             return_value=_verdict_llm({"agent": "finance_qa", "reasoning": "concept"}),
+        ), patch(
+            "src.workflow.classify.get_llm",
+            _classify_llm(on_topic=True, agent="finance_qa", needs_macro=False, reason="concept"),
         ), patch("src.agents.base_agent.get_llm"), patch.object(
             __import__("src.agents.base_agent", fromlist=["BaseAgent"]).BaseAgent,
             "_invoke_llm",

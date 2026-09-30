@@ -4,6 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Iterator, Optional
 
+from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from src.agents.finance_qa_agent import FinanceQAAgent
@@ -14,7 +15,8 @@ from src.agents.portfolio_agent import PortfolioAgent
 from src.agents.tax_education_agent import TaxEducationAgent
 from src.core.config import get_settings
 from src.core.llm import message_text
-from src.core.state import AgentType, FinnieState
+from src.core.state import AgentType, FinnieState, UserProfile, turn_state_reset
+from src.persistence.backend import get_checkpointer, get_store
 from src.utils.logger import get_logger
 from src.workflow.classify import classify_node, route_after_classify
 from src.workflow.faq_cache import (
@@ -23,6 +25,7 @@ from src.workflow.faq_cache import (
     route_after_faq_cache,
 )
 from src.workflow.guardrail import guardrail_node, route_after_guardrail
+from src.workflow.hydrate import hydrate_node
 from src.workflow.router import router_node
 
 logger = get_logger(__name__)
@@ -73,6 +76,16 @@ def tax_education_node(state: FinnieState) -> dict:
 
 # ── Routing logic ─────────────────────────────────────────────────────────────
 
+# Agent display name (AIMessage.name) -> node key, for redrawing saved chats.
+AGENT_NAMES: dict[str, str] = {
+    FinanceQAAgent.name: "finance_qa",
+    PortfolioAgent.name: "portfolio",
+    MarketAnalysisAgent.name: "market_analysis",
+    GoalPlanningAgent.name: "goal_planning",
+    NewsSynthesizerAgent.name: "news_synthesizer",
+    TaxEducationAgent.name: "tax_education",
+}
+
 AGENT_NODES = [
     "finance_qa",
     "portfolio",
@@ -108,9 +121,18 @@ def route_from_classify(state: FinnieState) -> str:
 
 # ── Graph construction ────────────────────────────────────────────────────────
 
-@lru_cache(maxsize=1)
-def build_graph():
-    """Build and compile the LangGraph workflow. Cached per process.
+@lru_cache(maxsize=2)
+def build_graph(persistent: bool = False):
+    """Build and compile the LangGraph workflow. Cached per process and variant.
+
+    persistent=False  stateless: each invoke carries its own history. Used by
+                      one-shot callers (Portfolio/Market/Goals tabs, evals).
+    persistent=True   compiled with the checkpointer: a thread_id in the run
+                      config keeps the conversation across turns, refreshes
+                      and restarts. Used by the chat page.
+
+    Both variants get the store, so the hydrate node can load the signed-in
+    user's profile, holdings and saved plan.
 
     Shape depends on two independently reversible flags in ``config.yaml``:
 
@@ -143,6 +165,11 @@ def build_graph():
         graph.add_node("router", router_node)
         entry_node = "guardrail"
 
+    # Load the user's saved data before classification. After the FAQ cache,
+    # so a cache hit (which uses no personal context) costs no store read.
+    graph.add_node("hydrate", hydrate_node)
+    graph.add_edge("hydrate", entry_node)
+
     # Entry: the FAQ cache short-circuits before any classification.
     if use_cache:
         graph.add_node("faq_cache", faq_cache_node)
@@ -151,10 +178,10 @@ def build_graph():
         graph.add_conditional_edges(
             "faq_cache",
             route_after_faq_cache,
-            {"hit": END, "miss": entry_node},
+            {"hit": END, "miss": "hydrate"},
         )
     else:
-        graph.add_edge(START, entry_node)
+        graph.add_edge(START, "hydrate")
 
     if use_merged:
         # One conditional hop: refusal → END, otherwise straight to the agent.
@@ -181,11 +208,15 @@ def build_graph():
     if use_cache:
         graph.add_edge("faq_cache_write", END)
 
-    compiled = graph.compile()
+    compiled = graph.compile(
+        checkpointer=get_checkpointer() if persistent else None,
+        store=get_store(),
+    )
     logger.info(
         "langgraph_workflow_compiled",
         merged_classifier=use_merged,
         faq_cache=use_cache,
+        persistent=persistent,
     )
     return compiled
 
@@ -195,9 +226,7 @@ def _initial_state(
     conversation_history: list | None,
     user_profile: dict | None,
 ) -> FinnieState:
-    from langchain_core.messages import HumanMessage
-
-    from src.core.state import FinancialData, UserProfile
+    from src.core.state import FinancialData
 
     history = list(conversation_history or [])
     history.append(HumanMessage(content=user_message))
@@ -208,6 +237,47 @@ def _initial_state(
         user_profile=profile,
         financial_data=FinancialData(),
     )
+
+
+def _check_thread_owner(user_id: Optional[str], thread_id: str) -> None:
+    """A thread may only be used by the user whose id prefixes it.
+
+    Thread ids are minted server-side by UserData ("<user_id>:<uuid>"); this
+    guard turns a wiring bug that passes the wrong pair into a loud error
+    instead of one user reading another's conversation.
+    """
+    if not user_id or not thread_id.startswith(f"{user_id}:"):
+        raise ValueError("thread_id does not belong to user_id")
+
+
+def _prepare_turn(
+    user_message: str,
+    conversation_history: list | None,
+    user_profile: dict | None,
+    user_id: Optional[str],
+    thread_id: Optional[str],
+) -> tuple[Any, Any, dict[str, Any], list]:
+    """Pick the graph variant and build (graph, input, config, fallback_messages)."""
+    configurable: dict[str, Any] = {}
+    if user_id:
+        configurable["user_id"] = user_id
+
+    if thread_id:
+        _check_thread_owner(user_id, thread_id)
+        configurable["thread_id"] = thread_id
+        profile = UserProfile(**user_profile) if user_profile else UserProfile()
+        # The checkpoint holds the history, so send only this turn's message —
+        # and reset every other field, which would otherwise carry over from
+        # the previous turn (see turn_state_reset).
+        turn = {
+            **turn_state_reset(),
+            "user_profile": profile,
+            "messages": [HumanMessage(content=user_message)],
+        }
+        return build_graph(persistent=True), turn, {"configurable": configurable}, turn["messages"]
+
+    state = _initial_state(user_message, conversation_history, user_profile)
+    return build_graph(), state, {"configurable": configurable}, state.messages
 
 
 def _format_result(result: dict[str, Any], fallback_messages: list) -> dict[str, Any]:
@@ -245,21 +315,31 @@ def run_workflow(
     user_message: str,
     conversation_history: list | None = None,
     user_profile: dict | None = None,
+    *,
+    user_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Main entry point for running a single turn through the workflow.
 
+    user_id    the signed-in user (from the authenticated identity, never from
+               page input). Their saved profile, holdings and plan replace
+               `user_profile` for this turn.
+    thread_id  a persistent conversation owned by `user_id`. The history comes
+               from the checkpoint, so `conversation_history` is ignored.
+               Omit for a one-shot turn.
+
     Returns a dict with keys: final_response, agent_used, router_reasoning,
     financial_data, rag_context, cache_hit, messages.
     """
-    graph = build_graph()
-    initial_state = _initial_state(user_message, conversation_history, user_profile)
-
+    graph, turn, config, fallback = _prepare_turn(
+        user_message, conversation_history, user_profile, user_id, thread_id
+    )
     try:
-        result = graph.invoke(initial_state)
-        return _format_result(result, initial_state.messages)
+        result = graph.invoke(turn, config)
+        return _format_result(result, fallback)
     except Exception as exc:  # noqa: BLE001
-        return _error_result(exc, initial_state.messages)
+        return _error_result(exc, fallback)
 
 
 def stream_workflow(
@@ -267,22 +347,27 @@ def stream_workflow(
     conversation_history: list | None = None,
     user_profile: dict | None = None,
     sink: Optional[dict[str, Any]] = None,
+    *,
+    user_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> Iterator[str]:
     """Yield the answer as it is generated; fill `sink` with the full result.
 
-    Only tokens produced inside an agent node are yielded — the classifier's own
-    LLM call is filtered out. A FAQ cache hit produces no tokens at all, so the
-    cached answer is emitted in one piece. The trailing disclaimer, which agents
-    append after the model call, is flushed once the graph finishes.
+    Same arguments as run_workflow. Only tokens produced inside an agent node
+    are yielded — the classifier's own LLM call is filtered out. A FAQ cache
+    hit produces no tokens at all, so the cached answer is emitted in one
+    piece. The trailing disclaimer, which agents append after the model call,
+    is flushed once the graph finishes.
     """
-    graph = build_graph()
-    initial_state = _initial_state(user_message, conversation_history, user_profile)
+    graph, turn, config, fallback = _prepare_turn(
+        user_message, conversation_history, user_profile, user_id, thread_id
+    )
     streamed: list[str] = []
     final_state: dict[str, Any] = {}
 
     try:
         for mode, payload in graph.stream(
-            initial_state, stream_mode=["messages", "values"]
+            turn, config=config, stream_mode=["messages", "values"]
         ):
             if mode == "values":
                 final_state = payload
@@ -298,7 +383,7 @@ def stream_workflow(
                 streamed.append(text)
                 yield text
 
-        result = _format_result(final_state, initial_state.messages)
+        result = _format_result(final_state, fallback)
         # Emit whatever the agent added after the model call (the disclaimer),
         # or the whole answer when nothing streamed (cache hit).
         rendered = "".join(streamed)
@@ -309,7 +394,20 @@ def stream_workflow(
             sink.update(result)
 
     except Exception as exc:  # noqa: BLE001
-        result = _error_result(exc, initial_state.messages)
+        result = _error_result(exc, fallback)
         if sink is not None:
             sink.update(result)
         yield result["final_response"]
+
+
+def load_conversation(user_id: str, thread_id: str) -> list[BaseMessage]:
+    """The saved messages of a user's thread, for redrawing the chat after a refresh."""
+    _check_thread_owner(user_id, thread_id)
+    snapshot = build_graph(persistent=True).get_state({"configurable": {"thread_id": thread_id}})
+    return list((snapshot.values or {}).get("messages", []))
+
+
+def delete_conversation(user_id: str, thread_id: str) -> None:
+    """Permanently delete a user's saved thread (the chat page's Clear button)."""
+    _check_thread_owner(user_id, thread_id)
+    build_graph(persistent=True).checkpointer.delete_thread(thread_id)

@@ -42,7 +42,8 @@ st.set_page_config(
     page_title="Finnie — AI Finance Assistant",
     page_icon="💹",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # Open on desktop, collapsed behind the ☰ button on phones.
+    initial_sidebar_state="auto",
 )
 apply_theme()
 
@@ -62,16 +63,50 @@ from src.persistence.user_data import DEFAULT_PROFILE  # noqa: E402
 from src.web_app.memory_panel import render_memory_panel  # noqa: E402
 from src.web_app.session import current_user_data, persisted, save_if_changed  # noqa: E402
 
-# ── Sidebar navigation ────────────────────────────────────────────────────────
+# ── Navigation ────────────────────────────────────────────────────────────────
+
+PAGES = ["💬\u2002Chat", "📊\u2002Portfolio", "📈\u2002Market", "🎯\u2002Goals"]
+
+# Two widgets pick the page: the sidebar radio (desktop) and a tab bar at the
+# top of the page that only phones see (theme.py hides it on wide screens,
+# where the sidebar is always open). "nav" is the source of truth; each widget
+# copies its choice into it and the other widget's key follows.
+
+
+def _nav_from_sidebar() -> None:
+    st.session_state.nav_mobile = st.session_state.nav
+
+
+def _nav_from_mobile() -> None:
+    # A segmented control can be clicked off to nothing; keep the current page.
+    if st.session_state.nav_mobile is None:
+        st.session_state.nav_mobile = st.session_state.nav
+    else:
+        st.session_state.nav = st.session_state.nav_mobile
+
+
+def render_mobile_nav() -> None:
+    st.session_state.setdefault("nav_mobile", st.session_state.nav)
+    with st.container(key="fn-mobile-nav"):
+        st.segmented_control(
+            "Navigate",
+            PAGES,
+            key="nav_mobile",
+            on_change=_nav_from_mobile,
+            label_visibility="collapsed",
+        )
+
 
 def render_sidebar() -> str:
+    st.session_state.setdefault("nav", PAGES[0])
     with st.sidebar:
         render_brand()
 
         page = st.radio(
             "Navigate",
-            options=["💬\u2002Chat", "📊\u2002Portfolio", "📈\u2002Market", "🎯\u2002Goals"],
-            index=0,
+            options=PAGES,
+            key="nav",
+            on_change=_nav_from_sidebar,
             label_visibility="collapsed",
         )
 
@@ -136,6 +171,7 @@ def render_sidebar() -> str:
 
 def main() -> None:
     page = render_sidebar()
+    render_mobile_nav()
 
     # Every tab runs the workflow, so wait for the warm-up here. Usually it has
     # long finished by the time sign-in completes; on a cold instance this is

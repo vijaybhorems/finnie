@@ -11,6 +11,7 @@ mistaken for a working deployment.
 """
 from __future__ import annotations
 
+import atexit
 from functools import lru_cache
 from typing import Any
 
@@ -60,6 +61,10 @@ def get_pool() -> Any:
     # configured, an unreachable database is a deployment error — silently
     # falling back to memory would discard every profile saved until noticed.
     pool.open(wait=True, timeout=settings.persistence.connect_timeout_seconds)
+    # Close at interpreter exit. Otherwise psycopg_pool's finaliser waits up to
+    # 5s for each worker thread to stop — ~20s added to every shutdown (a CLI
+    # run, or Cloud Run's SIGTERM grace period).
+    atexit.register(pool.close)
     logger.info("postgres_pool_open", max_size=settings.persistence.pool_max_size)
     return pool
 

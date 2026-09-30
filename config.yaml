@@ -28,6 +28,11 @@ rag:
   top_k: 5
   index_path: "data/faiss_index"
   knowledge_base_path: "src/data/knowledge_base"
+  # "auto": pgvector (hybrid semantic + keyword search) when DATABASE_URL is
+  # set, else the FAISS file index. Set "faiss" or "pgvector" to force one.
+  backend: "auto"
+  hybrid_candidates: 20   # candidates per ranker before rank fusion
+  rrf_k: 60               # reciprocal rank fusion constant
 
 redis:
   host: "localhost"
@@ -102,6 +107,7 @@ fast_path:
   streaming: true           # stream agent tokens into the chat UI
   faq_cache:
     enabled: true
+    backend: "auto"   # postgres when DATABASE_URL is set (shared across instances), else redis
     similarity_threshold: 0.92  # below this, fall through to the full workflow
     ttl_seconds: 604800         # 7 days
     max_entries: 500

@@ -113,18 +113,33 @@ class RAGRetriever:
         category_filter: Optional[str] = None,
     ) -> str:
         """Return formatted context string for LLM prompt injection."""
-        chunks = self.search(query, top_k=top_k, category_filter=category_filter)
-        if not chunks:
-            return ""
+        return format_context(self.search(query, top_k=top_k, category_filter=category_filter))
 
-        parts = []
-        for i, chunk in enumerate(chunks, 1):
-            parts.append(
-                f"[Source {i}: {chunk['title']} ({chunk['source']})]\n{chunk['text']}"
-            )
-        return "\n\n---\n\n".join(parts)
+
+def format_context(chunks: list[dict[str, Any]]) -> str:
+    """Retrieved chunks as the context block agents put in the prompt (both backends)."""
+    return "\n\n---\n\n".join(
+        f"[Source {i}: {chunk['title']} ({chunk['source']})]\n{chunk['text']}"
+        for i, chunk in enumerate(chunks, 1)
+    )
+
+
+def rag_backend_name() -> str:
+    """"pgvector" or "faiss", resolving the "auto" setting."""
+    settings = get_settings()
+    backend = settings.rag.backend
+    if backend == "auto":
+        return "pgvector" if settings.database_url else "faiss"
+    if backend == "pgvector" and not settings.database_url:
+        raise RuntimeError("rag.backend is 'pgvector' but DATABASE_URL is not set")
+    return backend
 
 
 @lru_cache(maxsize=1)
-def get_retriever() -> RAGRetriever:
+def get_retriever() -> Any:
+    """The process-wide retriever: pgvector hybrid search, or the FAISS file index."""
+    if rag_backend_name() == "pgvector":
+        from src.rag.pgvector import PgVectorRetriever
+
+        return PgVectorRetriever()
     return RAGRetriever()

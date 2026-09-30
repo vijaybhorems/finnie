@@ -44,33 +44,6 @@ services:
       - finnie_net
     restart: unless-stopped
 
-  # ── RAG indexer (one-shot job to build FAISS index) ────
-  rag_indexer:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    container_name: finnie_rag_indexer
-    command: >
-      python -c "
-      from src.rag.indexer import RAGIndexer;
-      indexer = RAGIndexer();
-      indexer.build_index(force=False);
-      print('RAG index ready.')
-      "
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    env_file:
-      - .env
-    volumes:
-      - rag_index:/app/data/faiss_index
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - finnie_net
-
   # ── Streamlit web application ──────────────────────────
   app:
     build:
@@ -85,22 +58,17 @@ services:
       - DATABASE_URL=postgresql://finnie:${POSTGRES_PASSWORD:-finnie}@postgres:5432/finnie
     env_file:
       - .env
-    volumes:
-      - rag_index:/app/data/faiss_index
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      rag_indexer:
-        condition: service_completed_successfully
     networks:
       - finnie_net
     restart: unless-stopped
 
 volumes:
   redis_data:
-  rag_index:
   postgres_data:
 
 networks:

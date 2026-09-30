@@ -16,8 +16,13 @@ substitutions:
   _IMAGE_NAME: finnie-app
   _RUNTIME_SA: ""          # finnie-run@<project>.iam.gserviceaccount.com
   _CLOUDSQL_INSTANCE: ""   # <project>:<region>:<instance>
-  _MEMORY: 8Gi
+  # Peak p99 use over 30 days was ~1.4 GiB; 4 GiB leaves ~3x headroom. Memory
+  # doesn't buy speed (CPU is set separately) — running out restarts the instance.
+  _MEMORY: 4Gi
   _CPU: "2"
+  # One instance stays warm (billed at the idle rate) so visitors never wait for
+  # a cold start (~1 min). 0 scales to zero when idle: free, but slow to wake.
+  _MIN_INSTANCES: "1"
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -68,6 +73,10 @@ steps:
       - --memory=${_MEMORY}
       - --cpu=${_CPU}
       - --cpu-boost
+      - --min-instances=${_MIN_INSTANCES}
+      # gen2 runs on a full Linux kernel instead of gVisor; its much faster file
+      # system is what the cold-start import of torch/LangChain is bound by.
+      - --execution-environment=gen2
       # Streamlit holds a websocket per session; the 300s default cuts it every
       # five minutes. Affinity keeps a reconnecting browser on its instance.
       - --timeout=3600

@@ -12,7 +12,10 @@ if [ -n "${DATABASE_URL:-}" ]; then
 fi
 
 # Cloud Run sets PORT (8501 with --port=8501); default for plain `docker run`.
-exec python -m streamlit run src/web_app/app.py \
+# src.web_app.serve starts loading LangGraph + the embedding model in the
+# background, then runs Streamlit in the same process, so the sign-in page is
+# served at once and the heavy imports overlap boot and the user's sign-in.
+exec python -m src.web_app.serve \
   --server.port="${PORT:-8501}" \
   --server.address=0.0.0.0 \
   --server.headless=true \

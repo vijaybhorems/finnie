@@ -296,7 +296,7 @@ Categories: `investing_basics`, `portfolio_management`, `market_concepts`, `tax_
 
 ## Performance Considerations
 
-- **Startup warm-up**: the LangGraph workflow and the sentence-transformers embedding model are primed once at process start (`_warm_up` in `src/web_app/app.py`), so the first chat request doesn't pay the ~11s torch/model-load cost inline.
+- **Startup warm-up**: the LangGraph workflow and the sentence-transformers embedding model load once per process in a background thread (`src/web_app/warmup.py`). In the container, `src/web_app/serve.py` starts it as the server boots; with plain `streamlit run`, the first page render starts it. The sign-in page imports none of it, so it paints immediately on a cold instance while the load overlaps the user's Google sign-in.
 - **Lazy page imports**: `app.py` imports each tab's module only when that tab is opened, so landing on the default Chat tab doesn't pull in the other tabs' dependencies (Plotly, yFinance, etc.).
 - **Offline embedding model**: the Docker image bakes in the embedding model and loads it fully offline (`HF_HUB_OFFLINE`/`TRANSFORMERS_OFFLINE`), so model load does no network round-trip to the Hugging Face Hub.
 - **Parallel market data**: multi-ticker fetches (major indices, sector ETFs, watchlist) run concurrently via `YFinanceClient.get_current_prices` instead of sequentially, reusing the per-ticker cache and circuit breaker.
@@ -420,7 +420,9 @@ gcloud builds submit --config cloudbuild.yaml \
 
 - `--timeout=3600` and `--session-affinity` — Streamlit keeps a websocket per session; the 300s default cuts it every five minutes.
 - `--service-account=finnie-run@…` and `--add-cloudsql-instances` — Cloud SQL is reached through the built-in connector as a Unix socket at `/cloudsql/<connection-name>`.
-- `--memory=8Gi --cpu=2 --cpu-boost` — the torch / sentence-transformers stack OOMs at 512Mi. Override with `_MEMORY` / `_CPU`.
+- `--memory=4Gi --cpu=2 --cpu-boost` — the torch / sentence-transformers stack OOMs at 512Mi; peak use in production has been ~1.4 GiB. Override with `_MEMORY` / `_CPU`.
+- `--min-instances=1` — one instance stays warm (idle-rate billing) so visitors never hit a ~1 min cold start. Set `_MIN_INSTANCES=0` to scale to zero instead.
+- `--execution-environment=gen2` — a full Linux kernel instead of gVisor; the cold-start import of torch/LangChain is bound by file-system speed.
 
 **Migrations run before traffic.** The container entrypoint (`docker/entrypoint.sh`) runs `python -m src.persistence.migrate` — LangGraph tables, pgvector schema, knowledge-base sync — before Streamlit listens. If the database is unreachable the new revision never becomes ready and **the previous revision keeps serving**. Several instances starting at once are serialised by an advisory lock.
 
@@ -440,7 +442,6 @@ gcloud run services update finnie-app --region=us-central1 --env-vars-file=env-v
 
 ### Optional
 
-- **Avoid cold starts:** `--min-instances=1` keeps one warm instance, so the ~10s model load happens once. Costs always-on billing.
 - **Phoenix tracing:** set `TRACING_ENABLED=true` and `PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/s/<space>`, and add `--update-secrets=PHOENIX_API_KEY=phoenix-api-key:latest` (see [Observability](#observability--arize-phoenix-tracing)).
 
 ## Evaluation Criteria Coverage

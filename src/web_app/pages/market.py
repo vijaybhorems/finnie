@@ -8,6 +8,7 @@ import streamlit as st
 
 from src.data.yfinance_client import YFinanceClient
 from src.web_app.markdown import render_safe
+from src.web_app.theme import page_header
 from src.workflow.graph import run_workflow
 from src.web_app.session import current_user_id
 
@@ -22,8 +23,7 @@ _MAJOR_INDICES = {
 
 
 def render_market_page() -> None:
-    st.title("📈 Market Overview")
-    st.caption("Real-time market data, sector performance, and AI market analysis")
+    page_header("📈", "Market", "Live market data, sector performance and AI market analysis")
 
     tab1, tab2, tab3 = st.tabs(["🌍 Market Snapshot", "📉 Price Charts", "🤖 AI Market Analysis"])
 

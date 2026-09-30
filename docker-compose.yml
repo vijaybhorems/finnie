@@ -23,6 +23,27 @@ services:
       - finnie_net
     restart: unless-stopped
 
+  # ── Postgres: per-user data + chat history ───────────
+  # pgvector image so phase 4 (knowledge base on pgvector) needs no swap.
+  # Local development only — the password is a default, override it via env.
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: finnie_postgres
+    environment:
+      POSTGRES_USER: finnie
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finnie}
+      POSTGRES_DB: finnie
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finnie -d finnie"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finnie_net
+    restart: unless-stopped
+
   # ── RAG indexer (one-shot job to build FAISS index) ────
   rag_indexer:
     build:
@@ -61,12 +82,15 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://finnie:${POSTGRES_PASSWORD:-finnie}@postgres:5432/finnie
     env_file:
       - .env
     volumes:
       - rag_index:/app/data/faiss_index
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       rag_indexer:
         condition: service_completed_successfully
@@ -77,6 +101,7 @@ services:
 volumes:
   redis_data:
   rag_index:
+  postgres_data:
 
 networks:
   finnie_net:

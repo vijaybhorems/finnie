@@ -18,6 +18,8 @@ import streamlit as st
 
 from src.core.tracing import setup_tracing
 from src.utils.logger import get_logger, setup_logging
+from src.persistence.user_data import DEFAULT_PROFILE
+from src.web_app.session import current_user_data, persisted, save_if_changed
 from src.web_app.auth import (
     is_user_authorized,
     render_login_page,
@@ -90,12 +92,15 @@ def render_sidebar() -> str:
         st.divider()
         st.subheader("Your Profile")
 
+        # The profile is saved per user, so it follows them across refreshes
+        # and devices, and the agents read it from the store (hydrate node).
+        user_data = current_user_data()
         if "user_profile" not in st.session_state:
-            st.session_state.user_profile = {
-                "risk_tolerance": "moderate",
-                "investment_horizon": "long",
-                "knowledge_level": "beginner",
-            }
+            st.session_state.user_profile = persisted(
+                user_data.get_profile,
+                dict(DEFAULT_PROFILE),
+                "Couldn't load your saved profile — showing defaults.",
+            )
 
         st.session_state.user_profile["knowledge_level"] = st.selectbox(
             "Knowledge Level",
@@ -117,6 +122,15 @@ def render_sidebar() -> str:
             index=["short", "medium", "long"].index(
                 st.session_state.user_profile.get("investment_horizon", "long")
             ),
+        )
+
+        # A copy: the selectboxes mutate user_profile in place, and a baseline
+        # that is the same dict would change with it and never look different.
+        save_if_changed(
+            "_saved_profile",
+            dict(st.session_state.user_profile),
+            user_data.save_profile,
+            "Couldn't save your profile right now — it will reset on refresh.",
         )
 
         st.divider()

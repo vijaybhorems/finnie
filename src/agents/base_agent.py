@@ -11,7 +11,7 @@ from langchain_core.messages import BaseMessage, SystemMessage
 from src.agents.prompts import load_prompt, shared_system_prompt
 from src.core.config import get_settings
 from src.core.llm import get_llm, message_text, token_usage
-from src.core.state import FinnieState
+from src.core.state import FinnieState, trim_history
 from src.utils.logger import get_logger
 
 # Exceptions that indicate a transient network issue and are safe to retry.
@@ -107,7 +107,9 @@ class BaseAgent(ABC):
         # context sends only the two stable blocks.
         if context.strip():
             blocks.append(_text_block(f"# Context for this request\n\n{context.strip()}"))
-        return [SystemMessage(content=blocks), *state.messages]
+        # A persistent thread keeps the whole conversation; send a bounded window.
+        history = trim_history(state.messages, get_settings().workflow.max_history_messages)
+        return [SystemMessage(content=blocks), *history]
 
     def _get_user_context_str(self, state: FinnieState) -> str:
         profile = state.user_profile

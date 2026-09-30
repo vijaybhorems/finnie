@@ -14,6 +14,8 @@ import json
 import re
 from typing import Any
 
+from langchain_core.messages import AIMessage
+
 from src.core.config import get_settings
 from src.core.llm import get_llm, message_text
 from src.core.state import AgentType, FinnieState
@@ -73,11 +75,16 @@ def _matches_blocklist(query: str) -> str | None:
 def _reject(reason: str) -> dict[str, Any]:
     settings = get_settings()
     logger.warning("guardrail_rejected", reason=reason)
+    refusal = settings.guardrail.refusal_message
     return {
         "is_on_topic": False,
         "next_agent": AgentType.OUT_OF_SCOPE,
         "current_agent": AgentType.OUT_OF_SCOPE,
-        "final_response": settings.guardrail.refusal_message,
+        "final_response": refusal,
+        # Record the refusal in the conversation. On a persistent thread the
+        # question would otherwise sit in history unanswered, and the next
+        # turn's user message would be merged into it by the API.
+        "messages": [AIMessage(content=refusal, name="guardrail")],
         "router_reasoning": f"Blocked by guardrail: {reason}",
     }
 

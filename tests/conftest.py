@@ -15,6 +15,10 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("NEWS_API_KEY", "test_news_key")
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
+    # Tests use the in-memory persistence backend. Set explicitly (not just
+    # unset): pydantic-settings would otherwise read DATABASE_URL from a
+    # developer's .env and point the suite at a real database.
+    monkeypatch.setenv("DATABASE_URL", "")
 
 
 @pytest.fixture(autouse=True)
@@ -39,3 +43,5 @@ def clear_lru_caches():
     # leak entries (and FAQ answers) between tests.
     cache_module._cache_instance = None
     reset_breakers()
+    from src.persistence.backend import reset_persistence
+    reset_persistence()

@@ -1,6 +1,30 @@
 [server]
 fileWatcherType = "none"
 headless = true
+# Compress the websocket stream: long chat histories redraw on every rerun.
+enableWebsocketCompression = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+# Brand theme — see src/web_app/theme.py for the CSS the theme can't express.
+[theme]
+base = "light"
+primaryColor = "#0E7C66"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F7F6"
+textColor = "#0F1B2D"
+linkColor = "#0E7C66"
+borderColor = "#E4E8EC"
+showWidgetBorder = true
+baseRadius = "0.75rem"
+
+[theme.sidebar]
+backgroundColor = "#0B1F2A"
+secondaryBackgroundColor = "#132F3D"
+textColor = "#E6EEF2"
+primaryColor = "#34D399"
+borderColor = "#1E4A5C"

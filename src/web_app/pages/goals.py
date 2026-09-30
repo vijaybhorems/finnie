@@ -10,13 +10,13 @@ from src.core.config import get_settings
 from src.planning.life_events import EVENT_TYPES, LifeEvent
 from src.planning.projection_engine import ProjectionInputs, project_timeline, summarize
 from src.web_app.markdown import render_safe
+from src.web_app.theme import page_header
 from src.workflow.graph import run_workflow
 from src.web_app.session import current_user_data, current_user_id, persisted, save_if_changed
 
 
 def render_goals_page() -> None:
-    st.title("🎯 Financial Goal Planner")
-    st.caption("Set goals, run projections, and get AI-powered planning guidance")
+    page_header("🎯", "Goals", "Set goals, run projections and get AI-powered planning guidance")
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "🧮 Projection Calculator",

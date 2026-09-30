@@ -16,23 +16,26 @@ bootstrap_auth_secrets()
 
 import streamlit as st
 
-from src.core.tracing import setup_tracing
 from src.utils.logger import get_logger, setup_logging
-from src.persistence.user_data import DEFAULT_PROFILE
-from src.web_app.memory_panel import render_memory_panel
-from src.web_app.session import current_user_data, persisted, save_if_changed
+from src.web_app import warmup
 from src.web_app.auth import (
     is_user_authorized,
     render_login_page,
     render_unauthorized_page,
     render_user_info_sidebar,
 )
+from src.web_app.theme import apply_theme, render_brand
 
 setup_logging()
-# Must run before any LangChain/LangGraph import (page modules below) so the
-# OpenInference instrumentor can patch them.
-setup_tracing()
 logger = get_logger(__name__)
+
+# Load LangGraph + the embedding model in a background thread (a no-op if
+# src.web_app.serve already started it at boot). Nothing above this line, and
+# nothing the sign-in page draws, imports LangChain — so the sign-in page paints
+# immediately on a cold instance while the ~minute of imports runs alongside,
+# overlapping the user's Google round trip. Tracing is registered inside the
+# warm-up, before it imports LangChain.
+warmup.start()
 
 # ── Page config (must be first Streamlit call) ────────────────────────────────
 st.set_page_config(
@@ -41,6 +44,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+apply_theme()
 
 # ── Authentication gate ───────────────────────────────────────────────────────
 if not st.user.is_logged_in:
@@ -51,47 +55,27 @@ if not is_user_authorized():
     render_unauthorized_page()
     st.stop()
 
-
-# ── Startup warm-up ───────────────────────────────────────────────────────────
-# Prime the heavy singletons (LangGraph workflow + sentence-transformers embedding
-# model) once per process, behind a one-time spinner, so their ~11s import/load
-# cost is paid at server start instead of on the user's first chat message.
-# @st.cache_resource runs the body once per process and returns instantly on every
-# later rerun/session.
-@st.cache_resource(show_spinner="Warming up Finnie…")
-def _warm_up() -> bool:
-    from src.rag.retriever import get_retriever
-    from src.workflow.graph import build_graph
-
-    build_graph()
-    try:
-        get_retriever().warm_up()
-    except Exception as exc:  # non-fatal: RAG falls back to lazy load on first query
-        logger.warning("warmup_retriever_failed", error=str(exc))
-    logger.info("startup_warmup_complete")
-    return True
-
-
-_warm_up()
+# Persistence imports LangGraph; keep them behind the gate (see warm-up above),
+# and after tracing is registered so the instrumentor sees LangChain first.
+warmup.wait_for_tracing()
+from src.persistence.user_data import DEFAULT_PROFILE  # noqa: E402
+from src.web_app.memory_panel import render_memory_panel  # noqa: E402
+from src.web_app.session import current_user_data, persisted, save_if_changed  # noqa: E402
 
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 
 def render_sidebar() -> str:
     with st.sidebar:
-        st.image("https://img.icons8.com/fluency/96/savings.png", width=60)
-        st.title("Finnie 💹")
-        st.caption("AI-Powered Financial Education")
-        st.divider()
+        render_brand()
 
         page = st.radio(
             "Navigate",
-            options=["💬 Chat", "📊 Portfolio", "📈 Market", "🎯 Goals"],
+            options=["💬\u2002Chat", "📊\u2002Portfolio", "📈\u2002Market", "🎯\u2002Goals"],
             index=0,
             label_visibility="collapsed",
         )
 
         st.divider()
-        st.subheader("Your Profile")
 
         # The profile is saved per user, so it follows them across refreshes
         # and devices, and the agents read it from the store (hydrate node).
@@ -103,21 +87,23 @@ def render_sidebar() -> str:
                 "Couldn't load your saved profile — showing defaults.",
             )
 
-        st.session_state.user_profile["knowledge_level"] = st.selectbox(
+        profile_box = st.expander("Your profile", icon=":material/tune:", expanded=False)
+        profile_box.caption("Finnie tailors explanations to these.")
+        st.session_state.user_profile["knowledge_level"] = profile_box.selectbox(
             "Knowledge Level",
             ["beginner", "intermediate", "advanced"],
             index=["beginner", "intermediate", "advanced"].index(
                 st.session_state.user_profile.get("knowledge_level", "beginner")
             ),
         )
-        st.session_state.user_profile["risk_tolerance"] = st.selectbox(
+        st.session_state.user_profile["risk_tolerance"] = profile_box.selectbox(
             "Risk Tolerance",
             ["conservative", "moderate", "aggressive"],
             index=["conservative", "moderate", "aggressive"].index(
                 st.session_state.user_profile.get("risk_tolerance", "moderate")
             ),
         )
-        st.session_state.user_profile["investment_horizon"] = st.selectbox(
+        st.session_state.user_profile["investment_horizon"] = profile_box.selectbox(
             "Investment Horizon",
             ["short", "medium", "long"],
             index=["short", "medium", "long"].index(
@@ -136,9 +122,11 @@ def render_sidebar() -> str:
 
         render_memory_panel(user_data)
 
-        st.divider()
-        st.caption("⚠️ Finnie provides financial education, not personalized advice. "
-                   "Always consult a licensed financial advisor.")
+        st.markdown(
+            '<div class="fn-fineprint">Finnie provides financial education, not '
+            "personalised advice. Consult a licensed advisor before acting.</div>",
+            unsafe_allow_html=True,
+        )
 
         # Show logged-in user info at the bottom of the sidebar
         render_user_info_sidebar()
@@ -149,19 +137,26 @@ def render_sidebar() -> str:
 def main() -> None:
     page = render_sidebar()
 
+    # Every tab runs the workflow, so wait for the warm-up here. Usually it has
+    # long finished by the time sign-in completes; on a cold instance this is
+    # the only wait, and the sidebar is already drawn around it.
+    if not warmup.is_ready():
+        with st.spinner("Finnie is getting ready — this only happens after a quiet spell…"):
+            warmup.wait()
+
     # Import page modules lazily so landing on the default Chat tab doesn't pull
     # in the other tabs' dependencies (plotly, yfinance, portfolio/market/goals
     # code). Each module is imported once per process, then cached in sys.modules.
-    if page == "💬 Chat":
+    if page == "💬\u2002Chat":
         from src.web_app.pages.chat import render_chat_page
         render_chat_page()
-    elif page == "📊 Portfolio":
+    elif page == "📊\u2002Portfolio":
         from src.web_app.pages.portfolio import render_portfolio_page
         render_portfolio_page()
-    elif page == "📈 Market":
+    elif page == "📈\u2002Market":
         from src.web_app.pages.market import render_market_page
         render_market_page()
-    elif page == "🎯 Goals":
+    elif page == "🎯\u2002Goals":
         from src.web_app.pages.goals import render_goals_page
         render_goals_page()
 

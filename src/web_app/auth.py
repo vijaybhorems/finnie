@@ -1,6 +1,7 @@
 """Authentication helpers — Google OIDC via Streamlit's built-in auth."""
 from __future__ import annotations
 
+import html
 import os
 
 import streamlit as st
@@ -32,21 +33,10 @@ def is_user_authorized() -> bool:
 
 
 def render_login_page() -> None:
-    """Render a branded login page for unauthenticated users."""
-    st.markdown(
-        """
-        <div style="text-align: center; padding: 4rem 0;">
-            <h1>💹 Finnie</h1>
-            <h3>AI-Powered Financial Education</h3>
-            <p style="color: grey;">Sign in with your Google account to continue.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        if st.button("🔐 Sign in with Google", use_container_width=True):
-            st.login("google")
+    """Render the branded sign-in page for unauthenticated users."""
+    from src.web_app.theme import render_login_page as render_page
+
+    render_page(lambda: st.login("google"))
 
 
 def render_unauthorized_page() -> None:
@@ -60,18 +50,22 @@ def render_unauthorized_page() -> None:
 
 def render_user_info_sidebar() -> None:
     """Show the logged-in user's info and a sign-out button in the sidebar."""
+    name = getattr(st.user, "name", None) or st.user.email
+    avatar = getattr(st.user, "picture", None)
+    face = (
+        f'<img src="{html.escape(avatar, quote=True)}" alt="" referrerpolicy="no-referrer">'
+        if avatar
+        else f'<div class="fn-avatar">{html.escape(name[:1].upper())}</div>'
+    )
     with st.sidebar:
         st.divider()
-        cols = st.columns([1, 3])
-        with cols[0]:
-            avatar = getattr(st.user, "picture", None)
-            if avatar:
-                st.image(avatar, width=40)
-            else:
-                st.markdown("👤")
-        with cols[1]:
-            name = getattr(st.user, "name", st.user.email)
-            st.markdown(f"**{name}**")
-            st.caption(st.user.email)
-        if st.button("Sign out", key="sidebar_logout", use_container_width=True):
+        st.markdown(
+            f'<div class="fn-user">{face}<div style="min-width:0">'
+            f'<div class="fn-user-name">{html.escape(name)}</div>'
+            f'<div class="fn-user-mail">{html.escape(st.user.email)}</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        st.write("")
+        if st.button("Sign out", key="sidebar_logout", use_container_width=True,
+                     icon=":material/logout:"):
             st.logout()

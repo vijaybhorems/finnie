@@ -9,7 +9,7 @@ from src.web_app.session import persisted
 
 
 def render_memory_panel(user_data: UserData) -> None:
-    with st.expander("🧠 What Finnie remembers", expanded=False):
+    with st.expander("What Finnie remembers", icon=":material/psychology:", expanded=False):
         enabled = persisted(user_data.memory_enabled, True, "Couldn't load your memory setting.")
         wanted = st.toggle(
             "Remember things I share",

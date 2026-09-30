@@ -6,6 +6,7 @@ second device. session_state only caches what is drawn on screen.
 """
 from __future__ import annotations
 
+import html
 from typing import Optional
 
 import streamlit as st
@@ -13,6 +14,7 @@ import streamlit as st
 from src.core.config import get_settings
 from src.core.llm import message_text
 from src.web_app.markdown import render_safe, render_safe_stream
+from src.web_app.theme import page_header
 from src.memory.service import schedule_remember_turn
 from src.web_app.session import current_user_data, persisted
 from src.workflow.graph import (
@@ -37,41 +39,41 @@ _AGENT_LABELS = {
 _NO_MEMORY_AGENTS = {"out_of_scope", "error"}
 
 _QUICK_PROMPTS = [
-    "What is a P/E ratio?",
-    "How does compound interest work?",
-    "Explain the difference between Roth and Traditional IRA",
-    "What is dollar-cost averaging?",
-    "How should a beginner start investing?",
-    "What are index funds?",
-    "Explain tax-loss harvesting",
-    "What's happening in the market today?",
+    ("📐", "What is a P/E ratio?"),
+    ("📈", "How does compound interest work?"),
+    ("🧾", "Explain the difference between Roth and Traditional IRA"),
+    ("🗓️", "What is dollar-cost averaging?"),
+    ("🌱", "How should a beginner start investing?"),
+    ("🧺", "What are index funds?"),
+    ("✂️", "Explain tax-loss harvesting"),
+    ("📰", "What's happening in the market today?"),
 ]
+
+_USER_AVATAR = ":material/person:"
+_FINNIE_AVATAR = ":material/insights:"
 
 
 def render_chat_page() -> None:
-    st.title("💬 Chat with Finnie")
-    st.caption("Ask anything about investing, markets, taxes, or financial planning")
-
     _ensure_conversation()
 
-    # Quick prompts
-    with st.expander("✨ Quick prompts", expanded=len(st.session_state.messages) == 0):
-        cols = st.columns(4)
-        for i, prompt in enumerate(_QUICK_PROMPTS):
-            if cols[i % 4].button(prompt, key=f"qp_{i}", use_container_width=True):
-                st.session_state.pending_prompt = prompt
+    if not st.session_state.messages:
+        _render_empty_state()
+    else:
+        head, clear = st.columns([4, 1], vertical_alignment="center")
+        page_header("💬", "Chat", "Ask anything about investing, markets, taxes or planning", container=head)
+        with clear.popover("New chat", icon=":material/add_comment:", use_container_width=True):
+            st.caption("Start over? This deletes the current conversation.")
+            if st.button("Delete and start new", type="primary", use_container_width=True):
+                _clear_conversation()
                 st.rerun()
 
     # Display conversation history
     for msg in st.session_state.messages:
         role = msg["role"]
-        with st.chat_message(role, avatar="🧑" if role == "user" else "💹"):
+        with st.chat_message(role, avatar=_USER_AVATAR if role == "user" else _FINNIE_AVATAR):
             st.markdown(render_safe(msg["content"]))
             if role == "assistant" and "agent" in msg:
-                label = _AGENT_LABELS.get(msg["agent"], msg["agent"])
-                reasoning = msg.get("reasoning", "")
-                prefix = "⚡ Instant answer — " if msg.get("cached") else "Handled by: "
-                st.caption(f"{prefix}{label}" + (f" — {reasoning}" if reasoning else ""))
+                st.markdown(_agent_chip(msg), unsafe_allow_html=True)
 
     # Handle pending quick prompt
     if "pending_prompt" in st.session_state:
@@ -80,15 +82,36 @@ def render_chat_page() -> None:
         st.rerun()
 
     # Chat input
-    if user_input := st.chat_input("Ask Finnie a financial question..."):
+    if user_input := st.chat_input("Ask about investing, markets, taxes or planning…"):
         _process_message(user_input)
         st.rerun()
 
-    # Clear conversation: delete the saved thread and start a new one.
-    if st.session_state.messages:
-        if st.button("🗑️ Clear conversation", type="secondary"):
-            _clear_conversation()
-            st.rerun()
+
+def _render_empty_state() -> None:
+    first_name = (getattr(st.user, "given_name", None) or getattr(st.user, "name", None) or "").split(" ")[0]
+    greeting = f"Hi {html.escape(first_name)}," if first_name else "Hi there,"
+    st.markdown(
+        f'<div class="fn-hello">{greeting} <span>what shall we explore?</span></div>'
+        '<div class="fn-sub">Ask anything about investing, markets, taxes, or financial planning — '
+        "or start with one of these.</div>",
+        unsafe_allow_html=True,
+    )
+    with st.container(key="fn-prompts"):
+        for row in range(0, len(_QUICK_PROMPTS), 4):
+            cols = st.columns(4)
+            for col, (i, (icon, prompt)) in zip(cols, enumerate(_QUICK_PROMPTS[row:row + 4], start=row)):
+                if col.button(f"{icon}\u2002{prompt}", key=f"qp_{i}", use_container_width=True):
+                    st.session_state.pending_prompt = prompt
+                    st.rerun()
+
+
+def _agent_chip(msg: dict) -> str:
+    label = html.escape(_AGENT_LABELS.get(msg["agent"], msg["agent"]))
+    reasoning = msg.get("reasoning", "")
+    why = f' <span class="fn-chip-why">· {html.escape(reasoning)}</span>' if reasoning else ""
+    if msg.get("cached"):
+        return f'<span class="fn-chip fast">⚡ Instant answer · {label}</span>'
+    return f'<span class="fn-chip">{label}{why}</span>'
 
 
 def _ensure_conversation() -> None:
@@ -158,6 +181,10 @@ def _run_turn(user_input: str) -> dict:
     The history comes from the saved thread. If persistence was unavailable
     (no thread id), the turn runs one-shot, without earlier context.
     """
+    # Draw the question now; the history loop above ran before it was asked.
+    with st.chat_message("user", avatar=_USER_AVATAR):
+        st.markdown(render_safe(user_input))
+
     turn = {
         "user_message": user_input,
         "user_profile": st.session_state.get("user_profile"),
@@ -171,7 +198,7 @@ def _run_turn(user_input: str) -> dict:
     # Streaming path: render tokens as they arrive; `sink` receives the full
     # result once the graph finishes.
     sink: dict = {}
-    with st.chat_message("assistant", avatar="💹"):
+    with st.chat_message("assistant", avatar=_FINNIE_AVATAR):
         st.write_stream(render_safe_stream(stream_workflow(**turn, sink=sink)))
     return sink
 

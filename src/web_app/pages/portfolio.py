@@ -10,14 +10,14 @@ import streamlit as st
 
 from src.data.yfinance_client import YFinanceClient
 from src.web_app.markdown import render_safe
+from src.web_app.theme import page_header
 from src.workflow.graph import run_workflow
 from src.persistence.user_data import clean_holdings
 from src.web_app.session import current_user_data, current_user_id, persisted, save_if_changed
 
 
 def render_portfolio_page() -> None:
-    st.title("📊 Portfolio Analysis")
-    st.caption("Enter your holdings for an AI-powered portfolio analysis")
+    page_header("📊", "Portfolio", "Enter your holdings for an AI-powered portfolio analysis")
 
     tab1, tab2 = st.tabs(["📋 Holdings Input", "🤖 AI Analysis"])
 

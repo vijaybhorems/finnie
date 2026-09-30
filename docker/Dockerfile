@@ -46,11 +46,8 @@ COPY .streamlit/config.toml /app/.streamlit/config.toml
 EXPOSE 8501
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+    CMD curl -f "http://localhost:${PORT:-8501}/_stcore/health" || exit 1
 
-ENTRYPOINT ["python", "-m", "streamlit", "run", "src/web_app/app.py", \
-    "--server.port=8501", \
-    "--server.address=0.0.0.0", \
-    "--server.headless=true", \
-    "--server.fileWatcherType=none", \
-    "--browser.gatherUsageStats=false"]
+# Migrate (when DATABASE_URL is set), then start Streamlit on $PORT.
+RUN chmod +x docker/entrypoint.sh
+ENTRYPOINT ["docker/entrypoint.sh"]

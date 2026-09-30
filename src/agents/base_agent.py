@@ -113,11 +113,18 @@ class BaseAgent(ABC):
 
     def _get_user_context_str(self, state: FinnieState) -> str:
         profile = state.user_profile
-        return (
+        context = (
             f"User profile: knowledge_level={profile.knowledge_level}, "
             f"risk_tolerance={profile.risk_tolerance}, "
             f"investment_horizon={profile.investment_horizon}"
         )
+        if profile.memories:
+            # Per-request (block 3): which memories apply depends on the question.
+            lines = "\n".join(
+                f"- {m['fact']} (noted {m.get('noted_on', 'earlier')})" for m in profile.memories
+            )
+            context += f"\n\nSaved memories — what the user told Finnie in earlier conversations:\n{lines}"
+        return context
 
     def _add_disclaimer(self, text: str) -> str:
         return text + _DISCLAIMER

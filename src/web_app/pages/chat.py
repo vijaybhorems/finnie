@@ -13,6 +13,7 @@ import streamlit as st
 from src.core.config import get_settings
 from src.core.llm import message_text
 from src.web_app.markdown import render_safe, render_safe_stream
+from src.memory.service import schedule_remember_turn
 from src.web_app.session import current_user_data, persisted
 from src.workflow.graph import (
     AGENT_NAMES,
@@ -31,6 +32,9 @@ _AGENT_LABELS = {
     "tax_education": "🧾 Tax Education",
     "error": "⚠️ Error",
 }
+
+# Turns that must not be learned from: guardrail refusals and errors.
+_NO_MEMORY_AGENTS = {"out_of_scope", "error"}
 
 _QUICK_PROMPTS = [
     "What is a P/E ratio?",
@@ -190,6 +194,11 @@ def _process_message(user_input: str) -> None:
             "reasoning": reasoning,
             "cached": bool(result.get("cache_hit", False)),
         })
+
+        # Learn lasting facts from what the user said, in the background — the
+        # answer is already on screen. Refused and failed turns teach nothing.
+        if agent_used not in _NO_MEMORY_AGENTS:
+            schedule_remember_turn(current_user_data().user_id, user_input)
 
     except Exception as exc:
         error_msg = f"Sorry, I encountered an error: {exc}"

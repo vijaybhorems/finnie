@@ -28,6 +28,8 @@ class UserProfile(BaseModel):
     portfolio: list[dict[str, Any]] = Field(default_factory=list)
     goals: list[dict[str, Any]] = Field(default_factory=list)
     knowledge_level: str = "beginner"  # beginner / intermediate / advanced
+    # Saved facts relevant to this turn's question (hydrate node; per turn).
+    memories: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FinancialData(BaseModel):

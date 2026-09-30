@@ -1,0 +1,12 @@
+# Plain (non-secret) Cloud Run environment variables — copy to env-vars.yaml,
+# which is git-ignored because it holds personal data (the email allowlist).
+# Apply with:  gcloud run services update finnie-app --region=us-central1 --env-vars-file=env-vars.yaml
+# Secrets (API keys, DATABASE_URL, OAuth client secret) belong in Secret Manager,
+# never here — see deploy/setup_gcp.sh.
+REDIS_HOST: "10.0.0.3"            # Memorystore private IP, reached via the VPC connector
+REDIS_PORT: "6379"
+LOG_LEVEL: "INFO"
+DEBUG: "false"
+AUTH_REDIRECT_URI: "https://YOUR-SERVICE-URL/oauth2callback"
+# Comma-separated. EMPTY ALLOWS ANY GOOGLE ACCOUNT — always set it in production.
+ALLOWED_EMAILS: "you@example.com,family@example.com"

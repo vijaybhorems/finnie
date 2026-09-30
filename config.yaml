@@ -117,6 +117,16 @@ tracing:
   project_name: "finnie"
   endpoint: ""  # e.g. http://localhost:4317 (local/gRPC) or https://app.phoenix.arize.com/s/<space> (Phoenix Cloud/HTTP)
 
+memory:
+  # Durable facts users share in chat ("saving for a house by 2028"), recalled
+  # in later conversations. Users can see, delete, or switch this off.
+  enabled: true
+  min_confidence: 0.8         # keep only facts the extractor is sure were stated
+  max_facts_per_turn: 5
+  top_k: 5                    # memories injected per turn, most relevant first
+  dedup_similarity: 0.85      # a near-identical new fact replaces the old one
+  max_memories_per_user: 100
+
 planning:
   default_inflation: 0.03  # used for real (inflation-adjusted) projection view
   max_horizon_years: 60

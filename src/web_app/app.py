@@ -19,6 +19,7 @@ import streamlit as st
 from src.core.tracing import setup_tracing
 from src.utils.logger import get_logger, setup_logging
 from src.persistence.user_data import DEFAULT_PROFILE
+from src.web_app.memory_panel import render_memory_panel
 from src.web_app.session import current_user_data, persisted, save_if_changed
 from src.web_app.auth import (
     is_user_authorized,
@@ -132,6 +133,8 @@ def render_sidebar() -> str:
             user_data.save_profile,
             "Couldn't save your profile right now — it will reset on refresh.",
         )
+
+        render_memory_panel(user_data)
 
         st.divider()
         st.caption("⚠️ Finnie provides financial education, not personalized advice. "

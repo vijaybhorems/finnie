@@ -164,6 +164,20 @@ class PlanningConfig(BaseModel):
     max_events: int = 25
 
 
+class MemoryConfig(BaseModel):
+    """Long-term memory: durable facts users share in chat (src/memory/)."""
+    enabled: bool = True
+    # Only facts the extractor is at least this sure the user stated as true.
+    min_confidence: float = 0.8
+    max_facts_per_turn: int = 5
+    # Memories injected into a turn, ranked by relevance to the question.
+    top_k: int = 5
+    # A new fact this similar to an existing one of the same category replaces
+    # it (so "Is 35" supersedes "Is 34") instead of accumulating.
+    dedup_similarity: float = 0.85
+    max_memories_per_user: int = 100
+
+
 class AppConfig(BaseModel):
     name: str = "Finnie - AI Finance Assistant"
     version: str = "1.0.0"
@@ -204,6 +218,7 @@ class Settings(BaseSettings):
     fast_path: FastPathConfig = FastPathConfig()
     tracing: TracingConfig = TracingConfig()
     planning: PlanningConfig = PlanningConfig()
+    memory: MemoryConfig = MemoryConfig()
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -257,6 +272,8 @@ def get_settings() -> Settings:
         overrides["tracing"] = TracingConfig(**yaml_data["tracing"])
     if "planning" in yaml_data:
         overrides["planning"] = PlanningConfig(**yaml_data["planning"])
+    if "memory" in yaml_data:
+        overrides["memory"] = MemoryConfig(**yaml_data["memory"])
     if "app" in yaml_data:
         overrides["app"] = AppConfig(**yaml_data["app"])
 

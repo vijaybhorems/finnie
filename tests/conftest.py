@@ -21,6 +21,39 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "")
 
 
+def hash_embed(texts: list[str]) -> list[list[float]]:
+    """Deterministic bag-of-words embedding (md5 per word into 384 dims).
+
+    Similar wording gives similar vectors, so semantic search still behaves
+    sensibly, without loading the real model. md5, not hash(): Python string
+    hashing is randomised per process.
+    """
+    import hashlib
+    import math
+    import re
+
+    vectors = []
+    for text in texts:
+        vector = [0.0] * 384
+        for word in re.findall(r"[a-z0-9]+", text.lower()):
+            vector[int(hashlib.md5(word.encode()).hexdigest(), 16) % 384] += 1.0
+        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+        vectors.append([v / norm for v in vector])
+    return vectors
+
+
+@pytest.fixture(autouse=True)
+def fake_store_embeddings(request, monkeypatch):
+    """The store's semantic index (memories) uses hash_embed in tests.
+
+    Every workflow turn searches memories, so without this each test would
+    load the real embedding model. Mark a test `real_embeddings` to opt out.
+    """
+    if request.node.get_closest_marker("real_embeddings"):
+        return
+    monkeypatch.setattr("src.persistence.backend.embed_texts", hash_embed)
+
+
 @pytest.fixture(autouse=True)
 def clear_lru_caches():
     """Clear LRU-cached singletons between tests to prevent state leakage."""

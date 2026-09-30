@@ -11,6 +11,7 @@ from src.planning.life_events import EVENT_TYPES, LifeEvent
 from src.planning.projection_engine import ProjectionInputs, project_timeline, summarize
 from src.web_app.markdown import render_safe
 from src.workflow.graph import run_workflow
+from src.web_app.session import current_user_data, current_user_id, persisted, save_if_changed
 
 
 def render_goals_page() -> None:
@@ -176,22 +177,51 @@ def _render_life_timeline() -> None:
     st.caption("Compose major life events and see how they reshape your net worth over time")
 
     settings = get_settings()
+    user_data = current_user_data()
+    # The timeline is the user's saved plan: restored on load, saved on change,
+    # and visible to the Goal Planning agent in chat (hydrate node).
     if "timeline_events" not in st.session_state:
-        st.session_state.timeline_events = []
+        plan = persisted(user_data.get_plan, None, "Couldn't load your saved plan.") or {}
+        st.session_state.timeline_events = list(plan.get("events", []))
+        st.session_state.timeline_restored = plan
+    restored = st.session_state.timeline_restored
+    risk_options = ["conservative", "moderate", "aggressive"]
+
+    def _restored_int(key: str, default: int, low: int, high: int) -> int:
+        # number_input rejects mixed int/float arguments, and JSON may hand a
+        # saved value back as a float — cast to the widget's type and clamp.
+        try:
+            return min(max(int(restored.get(key, default)), low), high)
+        except (TypeError, ValueError):
+            return default
 
     # ── Baseline inputs ──
     col1, col2, col3 = st.columns(3)
     with col1:
-        start_age = st.number_input("Current Age", min_value=18, max_value=90, value=30, key="tl_age")
+        start_age = st.number_input(
+            "Current Age", min_value=18, max_value=90,
+            value=_restored_int("start_age", 30, 18, 90), key="tl_age",
+        )
+        max_horizon = settings.planning.max_horizon_years
         horizon = st.slider(
-            "Horizon (Years)", min_value=1, max_value=settings.planning.max_horizon_years, value=30, key="tl_horizon"
+            "Horizon (Years)", min_value=1, max_value=max_horizon,
+            value=_restored_int("horizon", 30, 1, max_horizon), key="tl_horizon",
         )
     with col2:
-        current_savings = st.number_input("Current Savings ($)", min_value=0, value=25_000, step=5_000, key="tl_savings")
-        monthly_contribution = st.number_input("Monthly Contribution ($)", min_value=0, value=1_000, step=100, key="tl_contrib")
+        current_savings = st.number_input(
+            "Current Savings ($)", min_value=0, step=5_000,
+            value=_restored_int("current_savings", 25_000, 0, 10**12), key="tl_savings",
+        )
+        monthly_contribution = st.number_input(
+            "Monthly Contribution ($)", min_value=0, step=100,
+            value=_restored_int("monthly_contribution", 1_000, 0, 10**9), key="tl_contrib",
+        )
     with col3:
+        saved_risk = restored.get("risk_tolerance")
         risk_tolerance = st.selectbox(
-            "Risk Tolerance", ["conservative", "moderate", "aggressive"], index=1, key="tl_risk"
+            "Risk Tolerance", risk_options,
+            index=risk_options.index(saved_risk) if saved_risk in risk_options else 1,
+            key="tl_risk",
         )
         annual_return = _RETURN_ASSUMPTIONS[risk_tolerance]
         view_real = st.toggle("Inflation-adjusted (real $)", value=False, key="tl_real")
@@ -242,6 +272,22 @@ def _render_life_timeline() -> None:
         if st.button("Clear all events", key="tl_clear"):
             st.session_state.timeline_events = []
             st.rerun()
+
+    # Saved only once it differs from what was restored (or the defaults), so a
+    # visitor who never touches the timeline has no plan saved in their name.
+    save_if_changed(
+        "_saved_plan",
+        {
+            "start_age": int(start_age),
+            "horizon": int(horizon),
+            "current_savings": int(current_savings),
+            "monthly_contribution": int(monthly_contribution),
+            "risk_tolerance": risk_tolerance,
+            "events": events_raw,
+        },
+        user_data.save_plan,
+        "Couldn't save your plan right now.",
+    )
 
     if not st.button("📈 Run Timeline Projection", type="primary", key="tl_run"):
         return
@@ -326,6 +372,7 @@ def _render_life_timeline() -> None:
             result = run_workflow(
                 user_message=summary_msg,
                 user_profile=st.session_state.get("user_profile"),
+                user_id=current_user_id(),
             )
         st.markdown(render_safe(result["final_response"]))
 
@@ -352,6 +399,7 @@ def _render_ai_goal_planner() -> None:
             result = run_workflow(
                 user_message=custom_goal,
                 user_profile=st.session_state.get("user_profile"),
+                user_id=current_user_id(),
             )
         st.markdown(render_safe(result["final_response"]))
 

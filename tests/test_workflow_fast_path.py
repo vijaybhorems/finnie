@@ -185,7 +185,7 @@ class _ScriptedGraph:
     def __init__(self, events) -> None:
         self._events = events
 
-    def stream(self, _state, stream_mode=None):
+    def stream(self, _state, config=None, stream_mode=None):
         yield from self._events
 
 

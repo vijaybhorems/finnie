@@ -92,6 +92,19 @@ class APIConfig(BaseModel):
 class WorkflowConfig(BaseModel):
     max_iterations: int = 10
     timeout_seconds: int = 60
+    # Conversation messages sent to an agent per call. Persistent threads keep
+    # the full history in the checkpoint; this bounds what each LLM call pays for.
+    max_history_messages: int = 40
+
+
+class PersistenceConfig(BaseModel):
+    """Per-user profile, holdings, saved plan and chat history (src/persistence/)."""
+    # "auto": Postgres when DATABASE_URL is set, otherwise in-process memory
+    # (data lost on restart — the pre-phase-3 behaviour, kept so a deploy without
+    # a database still runs). "postgres" requires DATABASE_URL.
+    backend: Literal["auto", "postgres", "memory"] = "auto"
+    pool_max_size: int = 10
+    connect_timeout_seconds: float = 10.0
 
 
 class CircuitBreakerConfig(BaseModel):
@@ -166,6 +179,7 @@ class Settings(BaseSettings):
     # doesn't match the field name.
     phoenix_api_key: str = Field(default="", validation_alias="PHOENIX_API_KEY")
     phoenix_endpoint: str = Field(default="", validation_alias="PHOENIX_COLLECTOR_ENDPOINT")
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
 
     # Nested config (from YAML)
     app: AppConfig = AppConfig()
@@ -175,6 +189,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = RedisConfig()
     apis: APIConfig = APIConfig()
     workflow: WorkflowConfig = WorkflowConfig()
+    persistence: PersistenceConfig = PersistenceConfig()
     circuit_breaker: CircuitBreakerConfig = CircuitBreakerConfig()
     guardrail: GuardrailConfig = GuardrailConfig()
     fast_path: FastPathConfig = FastPathConfig()
@@ -221,6 +236,8 @@ def get_settings() -> Settings:
         overrides["redis"] = RedisConfig(**redis_yaml)
     if "workflow" in yaml_data:
         overrides["workflow"] = WorkflowConfig(**yaml_data["workflow"])
+    if "persistence" in yaml_data:
+        overrides["persistence"] = PersistenceConfig(**yaml_data["persistence"])
     if "circuit_breaker" in yaml_data:
         overrides["circuit_breaker"] = CircuitBreakerConfig(**yaml_data["circuit_breaker"])
     if "guardrail" in yaml_data:

@@ -11,6 +11,8 @@ import streamlit as st
 from src.data.yfinance_client import YFinanceClient
 from src.web_app.markdown import render_safe
 from src.workflow.graph import run_workflow
+from src.persistence.user_data import clean_holdings
+from src.web_app.session import current_user_data, current_user_id, persisted, save_if_changed
 
 
 def render_portfolio_page() -> None:
@@ -26,15 +28,24 @@ def render_portfolio_page() -> None:
         _render_ai_analysis()
 
 
+_EXAMPLE_HOLDINGS = [
+    {"ticker": "AAPL", "shares": 10.0, "avg_cost": 150.0},
+    {"ticker": "MSFT", "shares": 5.0, "avg_cost": 300.0},
+    {"ticker": "VTI", "shares": 20.0, "avg_cost": 220.0},
+]
+
+
 def _render_holdings_input() -> None:
     st.subheader("Your Holdings")
+    user_data = current_user_data()
 
     if "portfolio_holdings" not in st.session_state:
-        st.session_state.portfolio_holdings = [
-            {"ticker": "AAPL", "shares": 10.0, "avg_cost": 150.0},
-            {"ticker": "MSFT", "shares": 5.0, "avg_cost": 300.0},
-            {"ticker": "VTI", "shares": 20.0, "avg_cost": 220.0},
-        ]
+        saved = persisted(user_data.get_holdings, [], "Couldn't load your saved holdings.")
+        st.session_state.portfolio_holdings = saved or _EXAMPLE_HOLDINGS
+        st.session_state.portfolio_is_example = not saved
+
+    if st.session_state.get("portfolio_is_example"):
+        st.caption("These are example holdings. Edit the table to save your own portfolio.")
 
     # Editable table
     holdings_df = pd.DataFrame(st.session_state.portfolio_holdings)
@@ -50,24 +61,41 @@ def _render_holdings_input() -> None:
         key="holdings_editor",
     )
 
+    # Saved as soon as the table differs from what was first shown — so the
+    # untouched example is never saved as the user's portfolio. Saved holdings
+    # are what the chat agents see (hydrate node).
+    edited = clean_holdings(edited_df.to_dict(orient="records"))
+    if edited != st.session_state.get("_saved_holdings", edited):
+        st.session_state.portfolio_is_example = False
+    save_if_changed("_saved_holdings", edited, user_data.save_holdings,
+                    "Couldn't save your holdings right now.")
+
     col1, col2 = st.columns(2)
     if col1.button("📊 Fetch Current Data", type="primary", use_container_width=True):
-        holdings = edited_df.to_dict(orient="records")
-        st.session_state.portfolio_holdings = holdings
+        holdings = _save_holdings_now(user_data, edited)
         with st.spinner("Fetching market data..."):
             # Fetch + store only; rendering happens once in the block below so the
             # charts aren't drawn twice in the same run.
             st.session_state.portfolio_metrics = YFinanceClient().get_portfolio_metrics(holdings)
 
     if col2.button("🤖 Get AI Analysis", type="secondary", use_container_width=True):
-        holdings = edited_df.to_dict(orient="records")
-        st.session_state.portfolio_holdings = holdings
+        _save_holdings_now(user_data, edited)
         st.session_state.portfolio_ai_requested = True
         st.rerun()
 
     # Render fetched metrics once per run (persists across reruns).
     if "portfolio_metrics" in st.session_state:
         _render_portfolio_metrics(st.session_state.portfolio_metrics)
+
+
+def _save_holdings_now(user_data, holdings: list[dict]) -> list[dict]:
+    """Explicit save on a button click: the user has chosen to use these holdings."""
+    saved = persisted(lambda: user_data.save_holdings(holdings), holdings,
+                      "Couldn't save your holdings right now.")
+    st.session_state.portfolio_holdings = saved
+    st.session_state._saved_holdings = saved
+    st.session_state.portfolio_is_example = False
+    return saved
 
 
 def _render_portfolio_metrics(metrics: dict) -> None:
@@ -167,6 +195,7 @@ def _render_ai_analysis() -> None:
             result = run_workflow(
                 user_message=prompt,
                 user_profile=st.session_state.get("user_profile"),
+                user_id=current_user_id(),
             )
 
         st.markdown(render_safe(result["final_response"]))

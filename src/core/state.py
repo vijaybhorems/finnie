@@ -73,3 +73,31 @@ class FinnieState(BaseModel):
 
     # Iteration guard
     iteration_count: int = 0
+
+
+def turn_state_reset() -> dict[str, Any]:
+    """Fresh values for every per-turn field of FinnieState.
+
+    On a checkpointed thread every field persists into the next turn, and only
+    `messages` has a reducer (append). Anything a turn computes must therefore
+    be reset at the start of the next one, or it leaks: a previous market
+    turn's financial_data would stop the FAQ cache writing, and a stale
+    final_response could be returned if a later node fails.
+
+    Built from the model's own defaults so a field added later is reset too.
+    """
+    defaults = FinnieState()
+    return {name: getattr(defaults, name) for name in FinnieState.model_fields if name != "messages"}
+
+
+def trim_history(messages: list[BaseMessage], max_messages: int) -> list[BaseMessage]:
+    """The most recent `max_messages` messages, starting at a human turn.
+
+    Persistent threads keep the whole conversation; this bounds what each LLM
+    call pays for. The Messages API requires the first message to be from the
+    user, so a window that would open on an assistant reply starts one later.
+    """
+    recent = list(messages[-max_messages:]) if 0 < max_messages < len(messages) else list(messages)
+    while recent and getattr(recent[0], "type", None) != "human":
+        recent.pop(0)
+    return recent or list(messages)

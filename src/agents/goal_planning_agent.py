@@ -84,6 +84,8 @@ class GoalPlanningAgent(BaseAgent):
         context = f"""
 {self._get_user_context_str(state)}
 
+{self._saved_plan_str(profile)}
+
 CURRENT ECONOMIC ENVIRONMENT (from FRED):
 {rate_env_str}
 
@@ -102,6 +104,17 @@ PROJECTION EXAMPLES FOR PLANNING PURPOSES:
             "messages": [AIMessage(content=response_text, name=self.name)],
             "final_response": response_text,
         }
+
+    def _saved_plan_str(self, profile) -> str:
+        """The life-event plan the user saved on the Goals tab, if any."""
+        plan = next((g for g in profile.goals if g.get("type") == "life_timeline"), None)
+        if not plan:
+            return "USER'S SAVED LIFE-EVENT PLAN: none saved on the Goals tab."
+        plan = {k: v for k, v in plan.items() if k != "type"}
+        return (
+            "USER'S SAVED LIFE-EVENT PLAN (from the Goals tab; reference it when relevant):\n"
+            + json.dumps(plan, indent=2, sort_keys=True, default=str)
+        )
 
     def _build_projection_examples(self, annual_return: float, risk_level: str) -> str:
         scenarios = [

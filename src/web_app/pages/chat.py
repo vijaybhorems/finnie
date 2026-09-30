@@ -12,6 +12,7 @@ import streamlit as st
 
 from src.core.config import get_settings
 from src.core.llm import message_text
+from src.web_app.markdown import render_safe, render_safe_stream
 from src.web_app.session import current_user_data, persisted
 from src.workflow.graph import (
     AGENT_NAMES,
@@ -61,7 +62,7 @@ def render_chat_page() -> None:
     for msg in st.session_state.messages:
         role = msg["role"]
         with st.chat_message(role, avatar="🧑" if role == "user" else "💹"):
-            st.markdown(msg["content"])
+            st.markdown(render_safe(msg["content"]))
             if role == "assistant" and "agent" in msg:
                 label = _AGENT_LABELS.get(msg["agent"], msg["agent"])
                 reasoning = msg.get("reasoning", "")
@@ -167,7 +168,7 @@ def _run_turn(user_input: str) -> dict:
     # result once the graph finishes.
     sink: dict = {}
     with st.chat_message("assistant", avatar="💹"):
-        st.write_stream(stream_workflow(**turn, sink=sink))
+        st.write_stream(render_safe_stream(stream_workflow(**turn, sink=sink)))
     return sink
 
 

@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.data.yfinance_client import YFinanceClient
+from src.web_app.markdown import render_safe
 from src.workflow.graph import run_workflow
 from src.persistence.user_data import clean_holdings
 from src.web_app.session import current_user_data, current_user_id, persisted, save_if_changed
@@ -197,6 +198,6 @@ def _render_ai_analysis() -> None:
                 user_id=current_user_id(),
             )
 
-        st.markdown(result["final_response"])
+        st.markdown(render_safe(result["final_response"]))
         label = result.get("agent_used", "")
         st.caption(f"Analysis by: Portfolio Analysis Agent")

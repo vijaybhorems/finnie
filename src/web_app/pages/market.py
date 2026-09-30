@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.data.yfinance_client import YFinanceClient
+from src.web_app.markdown import render_safe
 from src.workflow.graph import run_workflow
 from src.web_app.session import current_user_id
 
@@ -195,7 +196,7 @@ def _render_ai_market_analysis() -> None:
                 user_profile=st.session_state.get("user_profile"),
                 user_id=current_user_id(),
             )
-        st.markdown(result["final_response"])
+        st.markdown(render_safe(result["final_response"]))
 
 
 def _format_market_cap(cap) -> str:

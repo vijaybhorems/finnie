@@ -72,6 +72,12 @@ class RAGConfig(BaseModel):
     top_k: int = 5
     index_path: str = "data/faiss_index"
     knowledge_base_path: str = "src/data/knowledge_base"
+    # "auto": pgvector when DATABASE_URL is set, else the FAISS file index.
+    backend: Literal["auto", "faiss", "pgvector"] = "auto"
+    # Hybrid search (pgvector): each ranker contributes this many candidates,
+    # fused by reciprocal rank fusion with constant rrf_k.
+    hybrid_candidates: int = 20
+    rrf_k: int = 60
 
 
 class RedisConfig(BaseModel):
@@ -126,6 +132,9 @@ class GuardrailConfig(BaseModel):
 class FAQCacheConfig(BaseModel):
     """Semantic answer cache served before the classifier."""
     enabled: bool = True
+    # "auto": Postgres when DATABASE_URL is set (shared by every instance),
+    # else Redis with an in-process fallback.
+    backend: Literal["auto", "postgres", "redis"] = "auto"
     similarity_threshold: float = 0.92  # conservative: a wrong figure beats a miss
     ttl_seconds: int = 604800  # 7 days
     max_entries: int = 500

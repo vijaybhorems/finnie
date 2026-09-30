@@ -45,3 +45,7 @@ def clear_lru_caches():
     reset_breakers()
     from src.persistence.backend import reset_persistence
     reset_persistence()
+    from src.rag.pgvector import ensure_schema
+    from src.rag.retriever import get_retriever
+    ensure_schema.cache_clear()
+    get_retriever.cache_clear()

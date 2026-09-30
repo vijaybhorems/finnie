@@ -43,6 +43,51 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return [c for c in chunks if len(c.split()) > 10]
 
 
+def load_documents(kb_path: Path) -> list[dict[str, Any]]:
+    """Load every .txt and .md article under `kb_path` (sorted, so order is stable)."""
+    documents: list[dict[str, Any]] = []
+    kb_path = Path(kb_path)
+    if not kb_path.exists():
+        logger.warning("knowledge_base_not_found", path=str(kb_path))
+        return documents
+
+    for file_path in sorted(kb_path.rglob("*")):
+        if not file_path.is_file() or file_path.suffix not in (".txt", ".md"):
+            continue
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("document_load_error", file=str(file_path), error=str(exc))
+            continue
+        if file_path.suffix == ".md":
+            # Strip markdown headers for cleaner chunking
+            text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        documents.append({
+            "source": str(file_path.relative_to(kb_path)),
+            "category": file_path.parent.name,
+            "title": file_path.stem.replace("_", " ").title(),
+            "text": text,
+        })
+
+    logger.info("documents_loaded", count=len(documents))
+    return documents
+
+
+def chunk_documents(documents: list[dict[str, Any]], chunk_size: int, overlap: int) -> list[dict[str, Any]]:
+    """Split documents into chunks with stable ids ("<source>_<n>")."""
+    chunks: list[dict[str, Any]] = []
+    for doc in documents:
+        for i, chunk in enumerate(_chunk_text(doc["text"], chunk_size, overlap)):
+            chunks.append({
+                "chunk_id": f"{doc['source']}_{i}",
+                "source": doc["source"],
+                "category": doc["category"],
+                "title": doc["title"],
+                "text": chunk,
+            })
+    return chunks
+
+
 class RAGIndexer:
     """Builds and persists a FAISS index from the knowledge base."""
 
@@ -58,41 +103,7 @@ class RAGIndexer:
         return get_embedder()
 
     def _load_documents(self) -> list[dict[str, Any]]:
-        """Load all .txt and .md files from the knowledge base."""
-        documents: list[dict[str, Any]] = []
-        kb_path = Path(self._kb_path)
-        if not kb_path.exists():
-            logger.warning("knowledge_base_not_found", path=str(kb_path))
-            return documents
-
-        for file_path in kb_path.rglob("*.txt"):
-            try:
-                text = file_path.read_text(encoding="utf-8")
-                documents.append({
-                    "source": str(file_path.relative_to(kb_path)),
-                    "category": file_path.parent.name,
-                    "title": file_path.stem.replace("_", " ").title(),
-                    "text": text,
-                })
-            except Exception as exc:
-                logger.warning("document_load_error", file=str(file_path), error=str(exc))
-
-        for file_path in kb_path.rglob("*.md"):
-            try:
-                text = file_path.read_text(encoding="utf-8")
-                # Strip markdown headers for cleaner chunking
-                clean = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-                documents.append({
-                    "source": str(file_path.relative_to(kb_path)),
-                    "category": file_path.parent.name,
-                    "title": file_path.stem.replace("_", " ").title(),
-                    "text": clean,
-                })
-            except Exception as exc:
-                logger.warning("document_load_error", file=str(file_path), error=str(exc))
-
-        logger.info("documents_loaded", count=len(documents))
-        return documents
+        return load_documents(Path(self._kb_path))
 
     def build_index(self, force: bool = False) -> None:
         """Build and save the FAISS index. Skips if already built unless force=True."""
@@ -111,18 +122,7 @@ class RAGIndexer:
             logger.warning("no_documents_to_index")
             return
 
-        # Chunk documents
-        all_chunks: list[dict[str, Any]] = []
-        for doc in documents:
-            chunks = _chunk_text(doc["text"], self._chunk_size, self._overlap)
-            for i, chunk in enumerate(chunks):
-                all_chunks.append({
-                    "chunk_id": f"{doc['source']}_{i}",
-                    "source": doc["source"],
-                    "category": doc["category"],
-                    "title": doc["title"],
-                    "text": chunk,
-                })
+        all_chunks = chunk_documents(documents, self._chunk_size, self._overlap)
 
         logger.info("chunks_created", count=len(all_chunks))
 

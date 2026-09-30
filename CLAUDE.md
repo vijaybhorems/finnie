@@ -29,6 +29,7 @@ pytest --no-cov                       # faster, no coverage
 # Evals — NOT run in CI; build a real FAISS index and some hit the live Anthropic API
 pytest tests/evals -v
 FINNIE_EVAL_LIVE=1 pytest tests/evals/test_prompt_cache_evals.py -v -s   # proves prompt caching hits (reads real key from .env)
+FINNIE_TEST_DATABASE_URL=postgresql://user@localhost:5432/finnie_test pytest tests/test_persistence.py   # persistence + isolation on real Postgres (memory-only otherwise)
 python scripts/run_phoenix_evals.py --routing   # LLM-judge router accuracy
 python scripts/run_phoenix_evals.py --quality   # LLM-judge answer quality
 python scripts/run_phoenix_evals.py --all
@@ -42,11 +43,11 @@ docker compose up --build
 
 There is no configured linter/formatter (no ruff/black/mypy config) — `pyrightconfig.json` sets `basic` type-checking mode only.
 
-Tests auto-mock required env vars and clear LRU-cached singletons (`get_settings`, `get_llm`, `build_graph`, circuit breakers) between tests via autouse fixtures in `tests/conftest.py` — no manual cache-clearing needed when writing new tests.
+Tests auto-mock required env vars and clear LRU-cached singletons (`get_settings`, `get_llm`, `build_graph`, circuit breakers, persistence backends) between tests via autouse fixtures in `tests/conftest.py` — no manual cache-clearing needed when writing new tests. `conftest.py` sets `DATABASE_URL=""` so the suite always uses the in-memory backend, even when a developer's `.env` points at a real database.
 
 ## Architecture
 
-**Request flow:** `src/workflow/graph.py` builds a LangGraph `StateGraph` over `FinnieState` (`src/core/state.py`): `START → faq_cache → (classify → one of 6 agent nodes → faq_cache_write) | END`. `run_workflow()` is the single entry point; `stream_workflow()` is the streaming variant used by `src/web_app/pages/chat.py`.
+**Request flow:** `src/workflow/graph.py` builds a LangGraph `StateGraph` over `FinnieState` (`src/core/state.py`): `START → faq_cache → (hydrate → classify → one of 6 agent nodes → faq_cache_write) | END`. `run_workflow()` is the single entry point; `stream_workflow()` is the streaming variant used by `src/web_app/pages/chat.py`. Both take `user_id` (signed-in user) and `thread_id` (a persistent conversation); see Persistence below.
 
 The graph shape is controlled by two independently reversible flags under `fast_path` in `config.yaml` — with both off it rebuilds the original `START → guardrail → router → agent → END` pipeline, which is still tested:
 
@@ -62,6 +63,12 @@ The graph shape is controlled by two independently reversible flags under `fast_
   - Claude Sonnet 5 won't cache a prefix under 1,024 tokens; block 1 is sized to clear that alone. Shortening `finnie_core.md` or the knowledge base can drop it below — `prompt_cache_inactive` is logged once per agent when a call reads and writes nothing.
   - Prompts are sent as message objects, not a `ChatPromptTemplate`, so braces in RAG text or JSON data need no escaping.
   - After changing prompt assembly, run `FINNIE_EVAL_LIVE=1 pytest tests/evals/test_prompt_cache_evals.py -v -s` — the usage fields are the only proof the cache still hits.
+- **Persistence** (`src/persistence/`, `persistence` in `config.yaml`): per-user profile, holdings, saved Goals plan, and chat history. Postgres when `DATABASE_URL` is set (LangGraph `PostgresSaver` for threads + `PostgresStore` for user data, one pool); in-process memory otherwise — nothing survives a restart there, and a `persistence_in_memory` warning says so. `build_graph(persistent=True)` adds the checkpointer (chat page); `build_graph()` stays stateless (one-shot tabs, evals). Both get the store.
+  - **Identity**: `user_id` is `g-<Google sub>` from `st.user` (`src/web_app/session.py`, recomputed every call — never cached, never taken from page input). **All** user data goes through `UserData(user_id)`, which is bound to that one namespace and has no way to address another; thread ids are minted as `<user_id>:<uuid>` and `run_workflow`/`load_conversation`/`delete_conversation` refuse a thread whose prefix isn't the caller's. Isolation is application-level by design — LangGraph owns the tables and queries, so Postgres RLS has no per-request hook. `tests/test_persistence.py` is the cross-user leakage suite; keep it passing on Postgres.
+  - **hydrate node** (`src/workflow/hydrate.py`) loads the user's saved data into `state.user_profile` after an FAQ-cache miss. It reads the store through LangGraph's injected `store` parameter, which is only injected for the annotation spelling `Optional[BaseStore]`/`BaseStore` — `BaseStore | None` silently disables it and every turn loses personal context with no error (`TestHydrate` catches this).
+  - **Per-turn reset**: on a checkpointed thread every `FinnieState` field except `messages` carries into the next turn. `turn_state_reset()` (built from the model's defaults) is applied to each turn's input — add new fields to `FinnieState` with sensible defaults and they are reset automatically; never compute per-turn values that rely on the previous turn's state.
+  - Agents send at most `workflow.max_history_messages` of history (`trim_history`, window always opens on a user turn); the full thread stays in the checkpoint. Guardrail refusals are appended to `messages` so a refused question is never left unanswered in history.
+  - Pages save only on a real change or an explicit button (`save_if_changed`) — the Portfolio tab's example holdings and the Goals timeline's defaults are never saved as a user's own. Holdings are sanitised on write (`clean_holdings`): Postgres `jsonb` rejects the `NaN` that `st.data_editor` returns for blank cells.
 - **State** (`FinnieState`) is the single object threaded through every node: conversation `messages` (LangGraph-managed via `add_messages`), routing fields, guardrail verdict (`is_on_topic`), `UserProfile`, `FinancialData` payload, `rag_context`, and `final_response`.
 - **Config** (`src/core/config.py`): `get_settings()` is an `lru_cache`d singleton merging `config.yaml` (nested `LLMConfig`/`RAGConfig`/`CircuitBreakerConfig`/`GuardrailConfig`/`TracingConfig`/`PlanningConfig`/etc.) with env vars from `.env` (API keys, Redis host/port, Phoenix endpoint/key). If `AWS_SECRETS_NAME` is set, secrets are pulled from AWS Secrets Manager into the env *before* Settings loads (production path; local dev just uses `.env`). Env vars generally win over YAML (see Redis/Phoenix override logic at the bottom of `get_settings()`).
 - **Resilience**: each external data client (`src/data/{yfinance,alpha_vantage,fred,news}_client.py`) is wrapped in its own circuit breaker (`src/utils/circuit_breaker.py`) — opens after `failure_threshold` consecutive failures, stays open `recovery_timeout_seconds`, then allows one half-open probe. Caching (`src/utils/cache.py`, Redis with in-memory fallback) sits in front of these clients: 5 min for market data, 1 hour for macro, 24 hours for fundamentals.

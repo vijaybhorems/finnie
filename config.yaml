@@ -78,6 +78,15 @@ agents:
 workflow:
   max_iterations: 10
   timeout_seconds: 60
+  max_history_messages: 40  # conversation messages sent per LLM call
+
+persistence:
+  # User profile, holdings, saved plan and chat history. "auto" uses Postgres
+  # when DATABASE_URL is set and falls back to in-process memory otherwise
+  # (lost on restart). Set "postgres" to make a missing database a startup error.
+  backend: "auto"
+  pool_max_size: 10
+  connect_timeout_seconds: 10
 
 circuit_breaker:
   failure_threshold: 5

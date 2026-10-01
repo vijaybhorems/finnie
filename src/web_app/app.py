@@ -184,16 +184,16 @@ def main() -> None:
     # in the other tabs' dependencies (plotly, yfinance, portfolio/market/goals
     # code). Each module is imported once per process, then cached in sys.modules.
     if page == "💬\u2002Chat":
-        from src.web_app.pages.chat import render_chat_page
+        from src.web_app.views.chat import render_chat_page
         render_chat_page()
     elif page == "📊\u2002Portfolio":
-        from src.web_app.pages.portfolio import render_portfolio_page
+        from src.web_app.views.portfolio import render_portfolio_page
         render_portfolio_page()
     elif page == "📈\u2002Market":
-        from src.web_app.pages.market import render_market_page
+        from src.web_app.views.market import render_market_page
         render_market_page()
     elif page == "🎯\u2002Goals":
-        from src.web_app.pages.goals import render_goals_page
+        from src.web_app.views.goals import render_goals_page
         render_goals_page()
 
 

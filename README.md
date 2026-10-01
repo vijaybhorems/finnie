@@ -324,7 +324,7 @@ circuit_breaker:
 
 ## Life-Event Timeline Projection
 
-The Goals tab's **Life Timeline** sub-tab (`src/web_app/pages/goals.py`) layers a sequence of discrete life events onto a baseline savings projection using a pure, deterministic engine (`src/planning/projection_engine.py`). With no events, it reproduces the same year-by-year math as the existing single-goal projection (`_project_savings` in `src/agents/goal_planning_agent.py`) exactly.
+The Goals tab's **Life Timeline** sub-tab (`src/web_app/views/goals.py`) layers a sequence of discrete life events onto a baseline savings projection using a pure, deterministic engine (`src/planning/projection_engine.py`). With no events, it reproduces the same year-by-year math as the existing single-goal projection (`_project_savings` in `src/agents/goal_planning_agent.py`) exactly.
 
 Each event (`src/planning/life_events.py`) resolves to per-year savings and one-time net-worth deltas that the engine folds into the projection:
 

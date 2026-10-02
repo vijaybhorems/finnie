@@ -12,13 +12,15 @@ from src.web_app.theme import page_header
 from src.workflow.graph import run_workflow
 from src.web_app.session import current_user_id
 
-_MAJOR_INDICES = {
-    "S&P 500": "SPY",
-    "NASDAQ 100": "QQQ",
-    "Dow Jones": "DIA",
-    "Russell 2000": "IWM",
-    "Gold": "GLD",
-    "Bonds (AGG)": "AGG",
+# Funds that track each index, not the indices: the cards show share prices,
+# so they're labelled with the ticker first.
+_INDEX_ETFS = {
+    "SPY": "S&P 500",
+    "QQQ": "NASDAQ 100",
+    "DIA": "Dow Jones",
+    "IWM": "Russell 2000",
+    "GLD": "Gold",
+    "AGG": "US Bonds",
 }
 
 
@@ -38,12 +40,19 @@ def render_market_page() -> None:
 def _render_market_snapshot() -> None:
     yf_client = YFinanceClient()
 
-    st.subheader("Major Indices")
+    st.subheader("Index ETFs")
+    st.caption(
+        "Share prices of funds that track each index, not the index levels themselves "
+        "— SPY trades at roughly a tenth of the S&P 500, for example."
+    )
     with st.spinner("Loading market data..."):
-        prices = yf_client.get_current_prices(list(_MAJOR_INDICES.values()))
-        cols = st.columns(len(_MAJOR_INDICES))
-        for i, (name, ticker) in enumerate(_MAJOR_INDICES.items()):
-            data = prices.get(ticker.upper(), {})
+        prices = yf_client.get_current_prices(list(_INDEX_ETFS))
+        # Two rows of three: six in a row truncate labels and prices on tablets,
+        # and columns only stack at phone width.
+        cols = st.columns(3) + st.columns(3)
+        for i, (ticker, tracks) in enumerate(_INDEX_ETFS.items()):
+            name = f"{ticker} · {tracks}"
+            data = prices.get(ticker, {})
             price = data.get("current_price")
             change_pct = data.get("change_pct")
             if price and change_pct is not None:

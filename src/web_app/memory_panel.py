@@ -28,15 +28,19 @@ def render_memory_panel(user_data: UserData) -> None:
             st.caption("Nothing saved yet. Mention a goal or your situation in chat and it will appear here.")
             return
 
-        for memory in memories:
-            text_col, delete_col = st.columns([6, 1])
-            text_col.markdown(
-                f"{render_safe(memory['fact'])}  \n"
-                f":gray[{memory.get('category', '')} · noted {memory.get('noted_on', '')}]"
-            )
-            if delete_col.button("🗑️", key=f"forget_{memory['id']}", help="Forget this"):
-                persisted(lambda m=memory: user_data.forget(m["id"]), None, "Couldn't delete that memory.")
-                st.rerun()
+        # The keyed container gives theme.py a stable selector for the icon-only delete buttons.
+        with st.container(key="fn-memories"):
+            for memory in memories:
+                text_col, delete_col = st.columns([5, 1], wrap=False)  # keep the icon beside its fact on phones
+                text_col.markdown(
+                    f"{render_safe(memory['fact'])}  \n"
+                    f":gray[{memory.get('category', '')} · noted {memory.get('noted_on', '')}]"
+                )
+                # The label is visually hidden (theme.py) but kept as the button's accessible name.
+                if delete_col.button("Forget this", icon=":material/delete:", key=f"forget_{memory['id']}",
+                                     help="Forget this", type="tertiary"):
+                    persisted(lambda m=memory: user_data.forget(m["id"]), None, "Couldn't delete that memory.")
+                    st.rerun()
 
         if st.button("Forget everything", key="forget_all_memories"):
             persisted(user_data.forget_all, 0, "Couldn't delete your memories.")

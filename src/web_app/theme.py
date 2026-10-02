@@ -124,17 +124,21 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 [data-testid="stPopover"] button p { white-space: nowrap; }
 
 /* ── Mobile ─────────────────────────────────────────────────────────────── */
-/* The tab bar is for phones only; wider screens keep the sidebar open. */
-[data-testid="stVerticalBlockBorderWrapper"]:has(> .st-key-fn-mobile-nav) { display: none; }
+/* The tab bar is for phones only; wider screens keep the sidebar open.
+   Older Streamlit wraps the keyed container in stVerticalBlockBorderWrapper,
+   newer releases (1.64) in stLayoutWrapper; match both. */
+:is([data-testid="stVerticalBlockBorderWrapper"], [data-testid="stLayoutWrapper"]):has(> .st-key-fn-mobile-nav) { display: none; }
 @media (max-width: 767px) {
   /* A solid header, so content scrolls under it rather than behind the ☰ button. */
   header[data-testid="stHeader"] { background: #fff; }
   .block-container { padding: 3.5rem 1rem 7rem; }
   /* Sticky goes on Streamlit's wrapper: it's the box that spans the page. */
-  [data-testid="stVerticalBlockBorderWrapper"]:has(> .st-key-fn-mobile-nav) {
+  :is([data-testid="stVerticalBlockBorderWrapper"], [data-testid="stLayoutWrapper"]):has(> .st-key-fn-mobile-nav) {
     display: block; position: sticky; top: 3.75rem; z-index: 99;
     background: #fff; padding: .25rem 0 .5rem;
   }
+  /* Newer Streamlit sizes elements to their content (align-items: start); stretch the bar. */
+  .st-key-fn-mobile-nav [data-testid="stElementContainer"] { width: 100%; }
   .st-key-fn-mobile-nav [data-testid="stButtonGroup"] > div { display: flex; flex-wrap: nowrap; width: 100%; max-width: none; }
   /* Four equal tabs. Streamlit's button styles ignore flex-grow here, so size by min-width. */
   .st-key-fn-mobile-nav button { flex: 1 1 0; min-width: 25%; max-width: none; padding: .45rem .25rem; }

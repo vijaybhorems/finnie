@@ -24,7 +24,9 @@ psycopg[binary]>=3.2.0
 psycopg-pool>=3.2.0
 
 # Web UI
-streamlit[auth]>=1.45.0  # theme.sidebar / baseRadius in .streamlit/config.toml
+# Capped: theme.py targets Streamlit's DOM (data-testid wrappers), which changes between
+# releases. Verify the mobile tab bar at phone and desktop widths before raising the cap.
+streamlit[auth]>=1.45.0,<1.65  # >=1.45: theme.sidebar / baseRadius in .streamlit/config.toml
 plotly>=5.24.0
 pandas>=2.2.0
 

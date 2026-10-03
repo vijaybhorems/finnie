@@ -1,0 +1,6 @@
+# Local development and evals — not installed in the container image.
+-r requirements.txt
+
+# Local Phoenix UI (`phoenix serve`) and the LLM-judge evals in
+# scripts/run_phoenix_evals.py (phoenix.evals).
+arize-phoenix>=6.0.0

@@ -20,8 +20,9 @@ substitutions:
   # doesn't buy speed (CPU is set separately) — running out restarts the instance.
   _MEMORY: 4Gi
   _CPU: "2"
-  # One instance stays warm (billed at the idle rate) so visitors never wait for
-  # a cold start (~1 min). 0 scales to zero when idle: free, but slow to wake.
+  # One instance stays warm (billed at the full rate around the clock, since CPU
+  # throttling is off below) so visitors never wait for a cold start.
+  # 0 scales to zero when idle: free, but slow to wake.
   _MIN_INSTANCES: "1"
 
 options:
@@ -74,6 +75,16 @@ steps:
       - --cpu=${_CPU}
       - --cpu-boost
       - --min-instances=${_MIN_INSTANCES}
+      # CPU stays allocated between requests. With request-based CPU, an instance
+      # is throttled as soon as it is marked ready, so anything still loading
+      # stalls until a visitor arrives: the min instance took 2-77 minutes to
+      # warm up and the first visitor paid for it. Billed at the full rate.
+      - --no-cpu-throttling
+      # The container opens its port only once the workflow and embedding model
+      # are loaded (FINNIE_WARM_BEFORE_SERVE in docker/entrypoint.sh), so the TCP
+      # probe doubles as a readiness check. 5s x 120 = 600s, Cloud Run's maximum;
+      # the app gives up waiting at 540s (FINNIE_WARMUP_TIMEOUT) and serves anyway.
+      - --startup-probe=tcpSocket.port=8501,periodSeconds=5,timeoutSeconds=5,failureThreshold=120
       # gen2 runs on a full Linux kernel instead of gVisor; its much faster file
       # system is what the cold-start import of torch/LangChain is bound by.
       - --execution-environment=gen2

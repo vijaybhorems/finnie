@@ -121,8 +121,9 @@ Open http://localhost:8501. Compose starts Redis and Postgres (pgvector) first; 
 python -m venv .venv
 source .venv/bin/activate       # Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (requirements-dev.txt adds the local Phoenix UI and evals;
+# the container installs requirements.txt only)
+pip install -r requirements-dev.txt
 
 # Optional: Postgres with pgvector, for saved data, chat history and memory
 docker run -d -p 5432:5432 -e POSTGRES_USER=finnie -e POSTGRES_PASSWORD=finnie -e POSTGRES_DB=finnie pgvector/pgvector:pg16
@@ -248,7 +249,8 @@ finnie/
 ├── docker-compose.yml       # Redis + Postgres (pgvector) + app
 ├── cloudbuild.yaml          # build, push, deploy to Cloud Run
 ├── config.yaml
-├── requirements.txt
+├── requirements.txt         # runtime dependencies (what the image installs)
+├── requirements-dev.txt     # + local Phoenix UI and evals
 └── .env.example
 ```
 
@@ -256,7 +258,7 @@ finnie/
 
 ```bash
 # Install test dependencies
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Run all tests with coverage
 pytest
@@ -296,7 +298,7 @@ For LLM-as-judge routing accuracy and prompt/answer-quality reports (optionally 
 
 ```bash
 python scripts/run_phoenix_evals.py --routing   # router accuracy over labelled cases
-python scripts/run_phoenix_evals.py --quality   # LLM-judge answer quality (requires arize-phoenix)
+python scripts/run_phoenix_evals.py --quality   # LLM-judge answer quality (requires requirements-dev.txt)
 python scripts/run_phoenix_evals.py --all
 ```
 

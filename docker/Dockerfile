@@ -1,16 +1,36 @@
-FROM python:3.12-slim
+# --- Build stage: compile/install dependencies into a venv -------------------
+FROM python:3.12-slim AS builder
 
-# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# CPU-only torch first. From PyPI, sentence-transformers pulls the CUDA build and
+# ~2.5 GB of nvidia-* libraries that Cloud Run (no GPU) never loads, but every
+# new instance still pulls them and pays for the bigger import. With torch
+# already satisfied, the requirements install below keeps this one.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+ && if pip list 2>/dev/null | grep -qi '^nvidia-'; then \
+      echo "CUDA libraries were installed; a dependency replaced the CPU-only torch" >&2; exit 1; \
+    fi
+
+# --- Runtime stage: no compilers --------------------------------------------
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+WORKDIR /app
 
 # Streamlit's index.html says "Streamlit" with Streamlit's favicon until app.py's
 # set_page_config runs — seconds on a cold start, and always for link previews.
@@ -56,7 +76,8 @@ COPY .streamlit/config.toml /app/.streamlit/config.toml
 
 EXPOSE 8501
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# start-period covers the warm-up, which runs before the port opens (entrypoint.sh).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
     CMD curl -f "http://localhost:${PORT:-8501}/_stcore/health" || exit 1
 
 # Migrate (when DATABASE_URL is set), then start Streamlit on $PORT.

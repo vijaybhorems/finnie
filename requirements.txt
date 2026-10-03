@@ -41,7 +41,10 @@ pydantic-settings>=2.6.0
 structlog>=24.4.0
 
 # Observability / Tracing (Arize Phoenix + OpenInference)
-arize-phoenix>=6.0.0
+# Only the OTel exporter. The full arize-phoenix package (local `phoenix serve`,
+# phoenix.evals) is in requirements-dev.txt: installed alongside, its
+# phoenix/__init__.py imports the whole Phoenix server on `import phoenix.otel`,
+# which cost ~50s of every Cloud Run cold start.
 arize-phoenix-otel>=0.6.0
 openinference-instrumentation-langchain>=0.1.29
 

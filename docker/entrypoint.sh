@@ -12,9 +12,11 @@ if [ -n "${DATABASE_URL:-}" ]; then
 fi
 
 # Cloud Run sets PORT (8501 with --port=8501); default for plain `docker run`.
-# src.web_app.serve starts loading LangGraph + the embedding model in the
-# background, then runs Streamlit in the same process, so the sign-in page is
-# served at once and the heavy imports overlap boot and the user's sign-in.
+# src.web_app.serve loads LangGraph + the embedding model before Streamlit opens
+# the port, so the startup probe only passes once the instance is warm and no
+# visitor is routed to a half-loaded one. Set FINNIE_WARM_BEFORE_SERVE=0 to open
+# the port at once and warm up in the background instead.
+export FINNIE_WARM_BEFORE_SERVE="${FINNIE_WARM_BEFORE_SERVE:-1}"
 exec python -m src.web_app.serve \
   --server.port="${PORT:-8501}" \
   --server.address=0.0.0.0 \

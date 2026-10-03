@@ -12,6 +12,17 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Streamlit's index.html says "Streamlit" with Streamlit's favicon until app.py's
+# set_page_config runs — seconds on a cold start, and always for link previews.
+# Brand the static page with the same title and icon. The grep fails the build
+# if a Streamlit upgrade changes the <title> line, rather than silently reverting.
+COPY src/web_app/assets/favicon.png /tmp/finnie-favicon.png
+RUN STATIC="$(python -c 'import os, streamlit; print(os.path.join(os.path.dirname(streamlit.__file__), "static"))')" \
+ && grep -q '<title>Streamlit</title>' "$STATIC/index.html" \
+ && sed -i 's|<title>Streamlit</title>|<title>Finnie — AI Finance Assistant</title>|' "$STATIC/index.html" \
+ && cp /tmp/finnie-favicon.png "$STATIC/favicon.png" \
+ && rm /tmp/finnie-favicon.png
+
 # Pre-download the sentence-transformers embedding model so it is baked into the
 # image — the runtime model load then costs no network round-trip to the HF Hub.
 # Keep EMBEDDING_MODEL in sync with `embeddings.model` in config.yaml.

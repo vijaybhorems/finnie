@@ -38,9 +38,11 @@ logger = get_logger(__name__)
 warmup.start()
 
 # ── Page config (must be first Streamlit call) ────────────────────────────────
+# The Docker image writes the same title and icon into Streamlit's index.html,
+# so the tab reads "Finnie" before this runs too (docker/Dockerfile).
 st.set_page_config(
     page_title="Finnie — AI Finance Assistant",
-    page_icon="💹",
+    page_icon=str(Path(__file__).with_name("assets") / "favicon.png"),
     layout="wide",
     # Open on desktop, collapsed behind the ☰ button on phones.
     initial_sidebar_state="auto",

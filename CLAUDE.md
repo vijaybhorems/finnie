@@ -31,7 +31,7 @@ pytest tests/test_agents.py -v        # single file
 pytest tests/test_agents.py::TestClass::test_name -v   # single test
 pytest --no-cov                       # faster, no coverage
 
-# Evals — NOT run in CI; build a real FAISS index and some hit the live Anthropic API
+# Evals — build a real FAISS index; CI runs the offline ones, never the live (FINNIE_EVAL_LIVE=1) ones
 pytest tests/evals -v
 FINNIE_EVAL_LIVE=1 pytest tests/evals/test_memory_evals.py -v -s          # real extraction + recall across sessions (a few cents)
 FINNIE_EVAL_LIVE=1 pytest tests/evals/test_prompt_cache_evals.py -v -s   # proves prompt caching hits (reads real key from .env)
@@ -51,6 +51,8 @@ gcloud builds submit --config cloudbuild.yaml --substitutions=_RUNTIME_SA=...,_C
 # Docker Compose (Redis, Postgres+pgvector, then the app — which syncs the knowledge base at startup)
 docker compose up --build
 ```
+
+CI (`.github/workflows/ci.yml`, GitHub Actions) runs `pytest` on every PR and push to main, with a pgvector Postgres 16 service and `FINNIE_TEST_DATABASE_URL` set, so the Postgres variants of the persistence, isolation, pgvector and memory tests run there too. It installs CPU-only torch first, as the Dockerfile does. No secrets: live evals stay on demand.
 
 There is no configured linter/formatter (no ruff/black/mypy config) — `pyrightconfig.json` sets `basic` type-checking mode only.
 

@@ -40,9 +40,10 @@ class TestCacheBackend:
 
 
 class TestUnifiedCache:
-    @patch("src.utils.cache.redis")
-    def test_uses_fallback_when_redis_unavailable(self, mock_redis_module):
-        mock_redis_module.Redis.side_effect = Exception("Redis unavailable")
+    # Cache._init_redis imports redis lazily, so patch the class on the redis
+    # module itself; this also keeps the test from touching a real local Redis.
+    @patch("redis.Redis", side_effect=Exception("Redis unavailable"))
+    def test_uses_fallback_when_redis_unavailable(self, mock_redis_cls):
         from src.utils.cache import Cache
         cache = Cache()
         assert cache._redis is None
@@ -306,9 +307,12 @@ class TestNewsClient:
         mock_cache_inst.cache_key.return_value = "key"
         mock_cache.return_value = mock_cache_inst
 
+        # Real feedparser entries are FeedParserDicts, which the client reads
+        # with .get(); a plain MagicMock would answer every .get() with a mock.
+        from feedparser import FeedParserDict
         mock_feed = MagicMock()
         mock_feed.entries = [
-            MagicMock(title="Test headline", link="https://example.com", published="2024-01-01", summary="Test summary"),
+            FeedParserDict(title="Test headline", link="https://example.com", published="2024-01-01", summary="Test summary"),
         ]
         mock_feedparser.parse.return_value = mock_feed
 
@@ -318,3 +322,5 @@ class TestNewsClient:
 
         assert len(results) > 0
         assert results[0]["title"] == "Test headline"
+        assert results[0]["url"] == "https://example.com"
+        assert results[0]["description"] == "Test summary"

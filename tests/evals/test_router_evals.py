@@ -6,7 +6,8 @@ right agent across a wide range of queries.
 Two modes:
   - MOCKED (default): Tests the routing logic with a mock LLM that returns
     deterministic JSON responses.
-  - LIVE: Set FINNIE_EVAL_LIVE=1 to test with the real Claude API.
+  - LIVE: Set FINNIE_EVAL_LIVE=1 to test with the real Claude API, through
+    whichever node the live graph routes with (route_like_production).
 
 Run with:
     pytest tests/evals/test_router_evals.py -v
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,6 +33,30 @@ def _make_state(query: str) -> FinnieState:
         user_profile=UserProfile(),
         financial_data=FinancialData(),
     )
+
+
+def route_like_production(state: FinnieState) -> dict[str, Any]:
+    """Route a turn with the node the live graph uses.
+
+    That is the merged classifier while ``fast_path.merged_classifier`` is on
+    (the default), else the legacy router. Live accuracy evals go through this,
+    so they measure what users get rather than a node the graph may not run.
+    An off-topic verdict comes back as ``AgentType.OUT_OF_SCOPE``.
+    """
+    from src.core.config import get_settings
+
+    if get_settings().fast_path.merged_classifier:
+        from src.workflow.classify import classify_node
+        return classify_node(state)
+    from src.workflow.router import router_node
+    return router_node(state)
+
+
+def routing_node_name() -> str:
+    """Which node route_like_production will call, for eval reports."""
+    from src.core.config import get_settings
+
+    return "classify" if get_settings().fast_path.merged_classifier else "router"
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +83,7 @@ ROUTING_CASES = [
     ("What's the current price of NVDA?", AgentType.MARKET_ANALYSIS),
     ("How are tech stocks performing?", AgentType.MARKET_ANALYSIS),
     ("Is there a golden cross on the S&P 500?", AgentType.MARKET_ANALYSIS),
+    ("How is the energy sector doing today?", AgentType.MARKET_ANALYSIS),
 
     # Goal Planning
     ("How much do I need to retire at 55?", AgentType.GOAL_PLANNING),
@@ -70,6 +97,7 @@ ROUTING_CASES = [
     ("Any news about the Fed meeting?", AgentType.NEWS_SYNTHESIZER),
     ("What are the latest earnings reports?", AgentType.NEWS_SYNTHESIZER),
     ("Tell me about recent SEC filings", AgentType.NEWS_SYNTHESIZER),
+    ("Did anything big move markets this week?", AgentType.NEWS_SYNTHESIZER),
 
     # Tax Education
     ("How does a Roth IRA work?", AgentType.TAX_EDUCATION),
@@ -97,6 +125,7 @@ class _MockRouterLLM:
         "current price": "market_analysis",
         "tech stocks": "market_analysis",
         "golden cross": "market_analysis",
+        "energy sector": "market_analysis",
         "retire": "goal_planning",
         "save $": "goal_planning",
         "buy a house": "goal_planning",
@@ -106,6 +135,7 @@ class _MockRouterLLM:
         "news": "news_synthesizer",
         "earnings reports": "news_synthesizer",
         "sec filings": "news_synthesizer",
+        "move markets": "news_synthesizer",
         "fed meeting": "news_synthesizer",
         "roth ira": "tax_education",
         "capital gains": "tax_education",
@@ -191,6 +221,38 @@ class TestRouterAccuracy:
         assert "error" in result["router_reasoning"].lower()
 
 
+class TestRouteLikeProduction:
+    """The live evals must route through the node the graph actually runs."""
+
+    def test_uses_classifier_when_merged_classifier_on(self):
+        from src.core.config import get_settings
+        get_settings().fast_path.merged_classifier = True
+        verdict = {"next_agent": AgentType.TAX_EDUCATION}
+
+        with patch("src.workflow.classify.classify_node", return_value=verdict) as classify, \
+                patch("src.workflow.router.router_node") as router:
+            result = route_like_production(_make_state("How does a Roth IRA work?"))
+
+        assert result is verdict
+        classify.assert_called_once()
+        router.assert_not_called()
+        assert routing_node_name() == "classify"
+
+    def test_uses_legacy_router_when_merged_classifier_off(self):
+        from src.core.config import get_settings
+        get_settings().fast_path.merged_classifier = False
+        verdict = {"next_agent": AgentType.PORTFOLIO}
+
+        with patch("src.workflow.router.router_node", return_value=verdict) as router, \
+                patch("src.workflow.classify.classify_node") as classify:
+            result = route_like_production(_make_state("How diversified is my portfolio?"))
+
+        assert result is verdict
+        router.assert_called_once()
+        classify.assert_not_called()
+        assert routing_node_name() == "router"
+
+
 # ---------------------------------------------------------------------------
 # Live router tests (real Claude API)
 # ---------------------------------------------------------------------------
@@ -204,12 +266,11 @@ class TestLiveRouterAccuracy:
         ids=[f"{a.value}:{q[:40]}" for q, a in ROUTING_CASES],
     )
     def test_live_routing(self, query, expected_agent):
-        from src.workflow.router import router_node
         state = _make_state(query)
-        result = router_node(state)
+        result = route_like_production(state)
 
         assert result["next_agent"] == expected_agent, (
-            f"LIVE: Query '{query}' routed to {result['next_agent'].value}, "
+            f"LIVE ({routing_node_name()}): Query '{query}' routed to {result['next_agent'].value}, "
             f"expected {expected_agent.value}. "
             f"Reasoning: {result.get('router_reasoning', 'N/A')}"
         )

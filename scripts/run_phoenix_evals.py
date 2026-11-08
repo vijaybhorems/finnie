@@ -1,8 +1,9 @@
 """Phoenix-based evals for prompt quality and agent routing.
 
 Two evaluations:
-  1. Routing accuracy  — runs the real router over labelled cases and reports
-     accuracy + a per-miss breakdown (debug agent routing).
+  1. Routing accuracy  — routes labelled cases through the node the live graph
+     uses (the merged classifier by default) and reports accuracy + a per-miss
+     breakdown (debug agent routing).
   2. Prompt/answer quality — uses phoenix.evals.llm_classify with an LLM judge
      to label agent answers (evaluate prompts).
 
@@ -33,10 +34,17 @@ logger = get_logger(__name__)
 
 
 def run_routing_eval() -> float:
-    """Run the router over labelled cases and report accuracy. Returns accuracy [0,1]."""
+    """Route labelled cases the way the live graph does and report accuracy [0,1].
+
+    Uses the merged classifier while ``fast_path.merged_classifier`` is on, else
+    the legacy router (see ``route_like_production``).
+    """
     from src.core.state import FinancialData, FinnieState, UserProfile
-    from src.workflow.router import router_node
-    from tests.evals.test_router_evals import ROUTING_CASES
+    from tests.evals.test_router_evals import (
+        ROUTING_CASES,
+        route_like_production,
+        routing_node_name,
+    )
     from langchain_core.messages import HumanMessage
 
     total = len(ROUTING_CASES)
@@ -49,7 +57,7 @@ def run_routing_eval() -> float:
             user_profile=UserProfile(),
             financial_data=FinancialData(),
         )
-        result = router_node(state)
+        result = route_like_production(state)
         got = result["next_agent"]
         if got == expected:
             correct += 1
@@ -60,7 +68,7 @@ def run_routing_eval() -> float:
             )
 
     accuracy = correct / total if total else 0.0
-    print(f"\n=== Routing accuracy: {correct}/{total} = {accuracy:.1%} ===")
+    print(f"\n=== Routing accuracy ({routing_node_name()} node): {correct}/{total} = {accuracy:.1%} ===")
     if misses:
         print("\n".join(misses))
     return accuracy

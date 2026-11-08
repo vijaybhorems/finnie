@@ -81,6 +81,10 @@ AI finance education assistant. For each user query decide three things:
    - goal_planning: retirement planning, savings goals, projections, FIRE
    - news_synthesizer: current events, earnings, economic news, SEC filings
    - tax_education: capital gains, 401k, IRA, Roth, HSA, tax-loss harvesting, account types
+   market_analysis vs news_synthesizer: asking for numbers (a price, an indicator,
+   how a sector or index is performing) is market_analysis; asking what happened
+   or why (events, headlines, the Fed, earnings) is news_synthesizer, even when
+   the question mentions the market.
 3. needs_macro — would today's macro data (fed funds rate, CPI, GDP, unemployment,
    treasury yields) materially change the answer? Definitions and conceptual
    explanations do not need it.
@@ -90,6 +94,7 @@ Examples:
 - "How do current interest rates affect bond prices?" -> on_topic, finance_qa, needs_macro=true
 - "Analyze my portfolio: AAPL 10 shares @ $150" -> on_topic, portfolio, needs_macro=false
 - "What is Apple stock doing today?" -> on_topic, market_analysis, needs_macro=false
+- "Why did stocks drop this morning?" -> on_topic, news_synthesizer, needs_macro=false
 - "How much do I need to retire at 55?" -> on_topic, goal_planning, needs_macro=true
 - "How does a Roth IRA work?" -> on_topic, tax_education, needs_macro=false
 - "Give me a lasagna recipe" -> off_topic

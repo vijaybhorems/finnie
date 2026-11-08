@@ -48,7 +48,7 @@ class TestMarketFinancialData:
              patch("src.agents.market_analysis_agent.YFinanceClient") as mock_yf, \
              patch("src.agents.market_analysis_agent.AlphaVantageClient") as mock_av:
             mock_yf.return_value.get_current_price.return_value = {"current_price": 190.0}
-            mock_av.return_value.get_sector_performance.return_value = {"one_day": {}}
+            mock_yf.return_value.get_sector_performance.return_value = {"one_day": {}}
             mock_av.return_value.get_rsi.return_value = {"rsi": 55}
             from src.agents.market_analysis_agent import MarketAnalysisAgent
             result = MarketAnalysisAgent().run(_make_state("What is AAPL doing today?"))

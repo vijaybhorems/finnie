@@ -1,0 +1,90 @@
+# Runs the test suite on every pull request and on pushes to main.
+#
+# The Postgres service is pgvector on Postgres 16, which matches docker-compose and
+# Cloud SQL. With FINNIE_TEST_DATABASE_URL set, the cross-user leakage suite
+# (test_persistence), pgvector retrieval and memory tests run against a real
+# database as well as the in-memory backend. Without it they would skip.
+#
+# Not run here: live evals (FINNIE_EVAL_LIVE=1) and the Phoenix LLM-judge
+# scripts. They call the Anthropic API and cost money, so they stay on demand.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: finnie
+          POSTGRES_PASSWORD: finnie
+          POSTGRES_DB: finnie_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finnie -d finnie_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Disposable: the tests truncate tables.
+      FINNIE_TEST_DATABASE_URL: postgresql://finnie:finnie@localhost:5432/finnie_test
+      HF_HUB_DISABLE_TELEMETRY: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # same as docker/Dockerfile
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # CPU-only torch first, as in docker/Dockerfile. From PyPI,
+      # sentence-transformers pulls the CUDA build (~2.5 GB of nvidia-* wheels).
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r requirements.txt
+          if pip list 2>/dev/null | grep -qi '^nvidia-'; then
+            echo "::error::CUDA libraries were installed; a dependency replaced the CPU-only torch"
+            exit 1
+          fi
+
+      # The evals build a real FAISS index with the embedding model named in
+      # config.yaml. Cache it so each run doesn't download it again.
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('config.yaml') }}
+          restore-keys: hf-${{ runner.os }}-
+
+      - name: Run tests
+        run: pytest
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          retention-days: 14
+          if-no-files-found: ignore

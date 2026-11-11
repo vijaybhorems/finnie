@@ -24,3 +24,7 @@ brainstorm/
 # Deployment config with personal data / local provisioning state
 env-vars.yaml
 deploy/.gcp.env
+
+# Voice spike
+.venv-voice/
+spike/voice/runs/

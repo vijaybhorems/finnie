@@ -12,3 +12,6 @@ dist
 build
 .DS_Store
 data/faiss_index
+.venv
+.venv-voice
+spike

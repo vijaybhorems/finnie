@@ -1,0 +1,7 @@
+# Voice spike only, installed on top of requirements.txt into a separate venv:
+#   uv venv .venv-voice --python 3.12
+#   uv pip install --python .venv-voice/bin/python -r requirements.txt -r spike/voice/requirements-voice.txt
+# Resolved 2026-11-10. Note: this moves LangGraph to 1.2.20 (the main venv has 1.2.12);
+# production needs both files to pin the same version (design doc, Deployment).
+livekit-agents[deepgram,elevenlabs,silero,turn-detector]==1.8.11
+livekit-api==1.2.2

@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Iterator, Optional
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, BaseMessageChunk, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from src.agents.finance_qa_agent import FinanceQAAgent
@@ -375,6 +375,12 @@ def stream_workflow(
 
             chunk, metadata = payload
             if metadata.get("langgraph_node") not in AGENT_NODES:
+                continue
+            # "messages" mode also emits the finished AIMessage an agent writes
+            # to state (a new id, so LangGraph doesn't know it was streamed).
+            # Forwarding it repeated the whole answer after its own tokens, and
+            # the flush below then sent it a third time. Tokens only.
+            if isinstance(chunk, BaseMessage) and not isinstance(chunk, BaseMessageChunk):
                 continue
             # message_text handles both plain-string and content-block chunks.
             # (Reading chunk.text directly calls a deprecated LangChain method.)

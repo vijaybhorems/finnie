@@ -214,6 +214,23 @@ class TestStreamWorkflow:
         assert sink["final_response"].endswith("Disclaimer")
         assert sink["agent_used"] == "finance_qa"
 
+    def test_finished_agent_message_is_not_repeated(self, monkeypatch):
+        """LangGraph also emits the AIMessage an agent returns; it must not be re-sent."""
+        from langchain_core.messages import AIMessage, AIMessageChunk
+
+        from src.workflow.graph import stream_workflow
+
+        final = "A P/E ratio compares price to earnings.\n\n---\nDisclaimer"
+        events = [
+            ("messages", (AIMessageChunk(content="A P/E ratio "), {"langgraph_node": "finance_qa"})),
+            ("messages", (AIMessageChunk(content="compares price to earnings."), {"langgraph_node": "finance_qa"})),
+            ("messages", (AIMessage(content=final, name="Finance Q&A Agent"), {"langgraph_node": "finance_qa"})),
+            ("values", {"final_response": final, "next_agent": AgentType.FINANCE_QA, "cache_hit": False}),
+        ]
+        monkeypatch.setattr("src.workflow.graph.build_graph", lambda: _ScriptedGraph(events))
+
+        assert "".join(stream_workflow("What is a P/E ratio?")) == final
+
     def test_cache_hit_emits_the_whole_answer(self, monkeypatch):
         from src.workflow.graph import stream_workflow
 

@@ -43,6 +43,11 @@ def faq_cache_node(state: FinnieState) -> dict[str, Any]:
     if not settings.fast_path.faq_cache.enabled:
         return {"cache_hit": False}
 
+    if state.channel != "chat":
+        # Cached answers are written for the screen (and voice answers are
+        # never stored, below): a spoken turn always generates its own.
+        return {"cache_hit": False}
+
     query = _extract_query(state)
     if not query.strip():
         return {"cache_hit": False}
@@ -92,6 +97,9 @@ def faq_cache_write_node(state: FinnieState) -> dict[str, Any]:
         # None (legacy path) or True (macro used) — either way the answer may be dated.
         return {}
     if _used_live_data(state):
+        return {}
+    if state.channel != "chat":
+        # A short spoken answer must never be served to a chat user.
         return {}
     if state.user_profile.memories:
         # The cache is shared by every user: an answer shaped by this user's

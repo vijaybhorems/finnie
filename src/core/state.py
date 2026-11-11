@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -59,8 +59,18 @@ class FinnieState(BaseModel):
     # None = not classified (legacy guardrail+router path) -> agents fetch as before.
     needs_macro: Optional[bool] = None
 
+    # Tickers the classifier resolved from the question, including companies
+    # named in words ("Apple" -> AAPL). Empty on the legacy path; agents fall
+    # back to finding symbols in the text.
+    query_tickers: list[str] = Field(default_factory=list)
+
     # True when the response was served from the semantic FAQ cache (no LLM call).
     cache_hit: bool = False
+
+    # Where the answer goes. "voice" answers are spoken: agents get a
+    # short-answer instruction in the per-request prompt block, and the FAQ
+    # cache (shared with chat) is neither read nor written. Set per turn.
+    channel: Literal["chat", "voice"] = "chat"
 
     # User context
     user_profile: UserProfile = Field(default_factory=UserProfile)

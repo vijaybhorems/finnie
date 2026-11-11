@@ -12,6 +12,9 @@ result routes straight to END with the canned refusal.
 """
 from __future__ import annotations
 
+import re
+import threading
+import time
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -67,6 +70,15 @@ class Verdict(BaseModel):
             "False for definitional or conceptual questions."
         ),
     )
+    tickers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "US ticker symbols for every company, fund or index the user names, "
+            "whether by name or symbol: 'Apple' -> AAPL, 'Nvidia and AMD' -> NVDA, AMD, "
+            "'the S&P 500' -> SPY, 'Berkshire' -> BRK-B. Only symbols you are sure of; "
+            "empty when no specific security is named."
+        ),
+    )
     reason: str = Field(default="", description="One short sentence explaining the decision.")
 
 
@@ -93,12 +105,87 @@ Examples:
 - "What is a P/E ratio?" -> on_topic, finance_qa, needs_macro=false
 - "How do current interest rates affect bond prices?" -> on_topic, finance_qa, needs_macro=true
 - "Analyze my portfolio: AAPL 10 shares @ $150" -> on_topic, portfolio, needs_macro=false
-- "What is Apple stock doing today?" -> on_topic, market_analysis, needs_macro=false
+- "What is Apple stock doing today?" -> on_topic, market_analysis, needs_macro=false, tickers=[AAPL]
 - "Why did stocks drop this morning?" -> on_topic, news_synthesizer, needs_macro=false
 - "How much do I need to retire at 55?" -> on_topic, goal_planning, needs_macro=true
 - "How does a Roth IRA work?" -> on_topic, tax_education, needs_macro=false
 - "Give me a lasagna recipe" -> off_topic
 """
+
+
+# ── Verdict cache ────────────────────────────────────────────────────────────
+# The verdict depends on the query text alone (no history, no user data), so a
+# short-lived per-process cache is safe. It lets a caller classify early — the
+# voice worker classifies the transcript while the user is still speaking — and
+# the graph's own classify step then reuses that result instead of a second call.
+_VERDICT_TTL_S = 120.0
+_VERDICT_MAX = 256
+_verdicts: dict[tuple[str, str], tuple[float, Verdict]] = {}
+_key_locks: dict[tuple[str, str], threading.Lock] = {}
+_verdicts_lock = threading.Lock()
+
+
+def _normalize(query: str) -> str:
+    """Case, punctuation and spacing differences don't change the verdict."""
+    return " ".join(re.sub(r"[^a-z0-9$%&/' ]+", " ", query.lower()).split())
+
+
+def clear_verdict_cache() -> None:
+    with _verdicts_lock:
+        _verdicts.clear()
+        _key_locks.clear()
+
+
+def classify_query(query: str) -> Verdict:
+    """One structured classifier call, reusing a recent verdict for the same text.
+
+    Raises on any model error or empty verdict; errors are never cached.
+    Concurrent calls for the same text share one model call.
+    """
+    settings = get_settings()
+    key = (settings.llm.classifier_model or settings.llm.model, _normalize(query))
+    with _verdicts_lock:
+        key_lock = _key_locks.setdefault(key, threading.Lock())
+    with key_lock:
+        with _verdicts_lock:
+            hit = _verdicts.get(key)
+        if hit and time.monotonic() - hit[0] < _VERDICT_TTL_S:
+            logger.info("classify_verdict_reused")
+            return hit[1]
+
+        llm = get_llm(streaming=False, model=settings.llm.classifier_model)
+        verdict = llm.with_structured_output(Verdict).invoke(
+            [
+                {"role": "system", "content": _CLASSIFY_SYSTEM},
+                {"role": "user", "content": f"Classify this query: {query}"},
+            ]
+        )
+        if verdict is None:
+            raise ValueError("classifier returned no verdict")
+        if isinstance(verdict, dict):
+            verdict = Verdict(**verdict)
+
+        with _verdicts_lock:
+            if len(_verdicts) >= _VERDICT_MAX:
+                oldest = min(_verdicts, key=lambda k: _verdicts[k][0])
+                _verdicts.pop(oldest, None)
+                _key_locks.pop(oldest, None)
+            _verdicts[key] = (time.monotonic(), verdict)
+        return verdict
+
+
+_TICKER = re.compile(r"^[A-Z]{1,5}(-[A-Z])?$")
+_MAX_TICKERS = 5
+
+
+def _clean_tickers(raw: list[str]) -> list[str]:
+    """Uppercase, yfinance spelling (BRK.B -> BRK-B), drop anything not ticker-shaped."""
+    out: list[str] = []
+    for t in raw or []:
+        t = str(t).strip().upper().replace(".", "-").lstrip("$")
+        if _TICKER.match(t) and t not in out:
+            out.append(t)
+    return out[:_MAX_TICKERS]
 
 
 def _default_verdict(reason: str) -> dict[str, Any]:
@@ -129,16 +216,7 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
     # 2) Single structured call. Any failure -> fail closed (or route to
     #    finance_qa when the scope gate is switched off entirely).
     try:
-        verdict = get_llm(streaming=False).with_structured_output(Verdict).invoke(
-            [
-                {"role": "system", "content": _CLASSIFY_SYSTEM},
-                {"role": "user", "content": f"Classify this query: {query}"},
-            ]
-        )
-        if verdict is None:
-            raise ValueError("classifier returned no verdict")
-        if isinstance(verdict, dict):
-            verdict = Verdict(**verdict)
+        verdict = classify_query(query)
 
         if settings.guardrail.enabled and not verdict.on_topic:
             return _reject(verdict.reason or "classified off-topic")
@@ -149,6 +227,7 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
             on_topic=True,
             agent=next_agent.value,
             needs_macro=verdict.needs_macro,
+            tickers=_clean_tickers(verdict.tickers),
             reason=verdict.reason,
         )
         return {
@@ -156,6 +235,7 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
             "next_agent": next_agent,
             "current_agent": AgentType.ROUTER,
             "needs_macro": verdict.needs_macro,
+            "query_tickers": _clean_tickers(verdict.tickers),
             "router_reasoning": verdict.reason,
         }
 

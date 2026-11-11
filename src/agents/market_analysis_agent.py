@@ -38,8 +38,9 @@ class MarketAnalysisAgent(BaseAgent):
         user_messages = [m for m in state.messages if hasattr(m, "type") and m.type == "human"]
         query = str(user_messages[-1].content) if user_messages else ""
 
-        # Extract any tickers mentioned in the query
-        mentioned_tickers = self._extract_tickers(query)
+        # Tickers the classifier resolved (it maps names: "Apple" -> AAPL), then
+        # any symbols written in the text. Spoken questions name companies.
+        mentioned_tickers = list(dict.fromkeys([*state.query_tickers, *self._extract_tickers(query)]))
 
         # Every quote, the sector sweep and each ticker's indicators are
         # independent provider calls. Issued serially they dominated the turn;

@@ -46,6 +46,16 @@ def _text_block(text: str, cache_control: Optional[dict[str, str]] = None) -> di
     return block
 
 
+# Voice turns (state.channel == "voice"): the answer is spoken, so it must be
+# short and plain. Overrides any length or format guidance in the role prompt.
+_VOICE_INSTRUCTION = """## This answer will be spoken aloud
+The user is talking to Finnie by voice and will hear this answer, not read it.
+- Answer in 2 to 4 short sentences, about 60 words at most. Put the single most useful point first.
+- Plain spoken English only: no markdown, headings, bullet points, tables, links or symbols that don't read aloud.
+- Say numbers the way a person would ("about seven percent", "two thousand dollars a month"), and round them.
+- If the topic needs more, end with one short offer to go deeper on a specific part, as a question.
+- This overrides any length or formatting guidance above. The rules about not recommending specific securities still apply."""
+
 class BaseAgent(ABC):
     """Abstract base for all Finnie agents."""
 
@@ -103,6 +113,9 @@ class BaseAgent(ABC):
             _text_block(shared_system_prompt(), cache),
             _text_block(self.role_prompt, cache),
         ]
+        # Per-request, so it goes in block 3 and never touches the cached prefix.
+        if state.channel == "voice":
+            context = f"{context.strip()}\n\n{_VOICE_INSTRUCTION}"
         # The API rejects empty text blocks, so an agent with no per-request
         # context sends only the two stable blocks.
         if context.strip():

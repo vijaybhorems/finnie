@@ -65,7 +65,9 @@ def clear_lru_caches():
     from src.rag.version import get_kb_version
     from src.utils.circuit_breaker import reset_breakers
     from src.utils.semantic_cache import get_faq_cache
+    from src.workflow.classify import clear_verdict_cache
     from src.workflow.graph import build_graph
+    clear_verdict_cache()
     get_settings.cache_clear()
     get_llm.cache_clear()
     build_graph.cache_clear()

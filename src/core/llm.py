@@ -80,11 +80,13 @@ def token_usage(response: Any) -> dict[str, int]:
 
 # Models that removed sampling params — passing `temperature`/`top_p`/`top_k`
 # to these returns HTTP 400. Steer these via prompting instead.
-_NO_SAMPLING_PARAMS = ("claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-fable-5")
+_NO_SAMPLING_PARAMS = (
+    "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-fable-5", "claude-haiku-5",
+)
 
 
-@lru_cache(maxsize=2)
-def get_llm(streaming: Optional[bool] = None) -> ChatAnthropic:
+@lru_cache(maxsize=4)
+def get_llm(streaming: Optional[bool] = None, model: Optional[str] = None) -> ChatAnthropic:
     """Return the shared ChatAnthropic client.
 
     ``streaming`` controls whether ``.invoke()`` issues a streaming request
@@ -93,19 +95,24 @@ def get_llm(streaming: Optional[bool] = None) -> ChatAnthropic:
     still get a complete message back. Pass ``False`` for structured-output
     calls (the classifier), which have no use for token events.
 
-    Defaults to the ``fast_path.streaming`` flag.
+    Defaults to the ``fast_path.streaming`` flag. ``model`` overrides
+    ``llm.model`` (the classifier passes ``llm.classifier_model``).
     """
     settings = get_settings()
     if streaming is None:
         streaming = settings.fast_path.streaming
 
+    model = model or settings.llm.model
     kwargs: dict = {
-        "model": settings.llm.model,
+        "model": model,
         "max_tokens": settings.llm.max_tokens,
         "anthropic_api_key": settings.anthropic_api_key,
         "streaming": streaming,
     }
     # Only send temperature to models that still accept it; newer models 400 on it.
-    if not settings.llm.model.startswith(_NO_SAMPLING_PARAMS):
+    if not model.startswith(_NO_SAMPLING_PARAMS):
         kwargs["temperature"] = settings.llm.temperature
+    # "adaptive" leaves the parameter out (model default); only "disabled" is sent.
+    if settings.llm.thinking == "disabled":
+        kwargs["thinking"] = {"type": "disabled"}
     return ChatAnthropic(**kwargs)

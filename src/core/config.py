@@ -58,6 +58,15 @@ class LLMConfig(BaseModel):
     model: str = "claude-sonnet-5"
     temperature: float = 0.1  # only applied to models that accept sampling params (see llm.py)
     max_tokens: int = 4096
+    # "adaptive" sends no thinking parameter: the model's default, which on
+    # Claude Sonnet 5 means it may think silently before its first text token
+    # (seconds on planning questions). "disabled" turns that off. The voice
+    # worker sets FINNIE_LLM_THINKING=disabled; see src/core/llm.py.
+    thinking: Literal["adaptive", "disabled"] = "adaptive"
+    # Model for the merged classifier (scope gate + routing). None = `model`.
+    # A smaller model answers this short structured call faster; check routing
+    # accuracy before switching (spike/voice/compare_classifier.py).
+    classifier_model: str | None = None
     prompt_caching: PromptCachingConfig = PromptCachingConfig()
 
 
@@ -294,5 +303,14 @@ def get_settings() -> Settings:
     tracing_enabled_raw = os.environ.get("TRACING_ENABLED")
     if tracing_enabled_raw is not None:
         settings.tracing.enabled = tracing_enabled_raw.strip().lower() in ("1", "true", "yes")
+
+    classifier_raw = os.environ.get("FINNIE_CLASSIFIER_MODEL")
+    if classifier_raw:
+        settings.llm.classifier_model = classifier_raw.strip()
+
+    # Per-process override for latency-sensitive callers (the voice worker).
+    thinking_raw = os.environ.get("FINNIE_LLM_THINKING")
+    if thinking_raw:
+        settings.llm.thinking = LLMConfig.model_validate({"thinking": thinking_raw.strip().lower()}).thinking
 
     return settings

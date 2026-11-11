@@ -240,7 +240,7 @@ finnie/
 │       ├── guardrail.py         # legacy path (fast_path.merged_classifier: false)
 │       └── router.py            # legacy path
 ├── tests/                   # pytest unit/integration suite
-│   └── evals/               # LLM-as-judge + Phoenix evals (run on demand, not in CI)
+│   └── evals/               # evals (offline ones run in CI; live ones on demand)
 ├── scripts/
 │   ├── build_rag_index.py
 │   └── run_phoenix_evals.py # routing accuracy + answer-quality evals
@@ -270,6 +270,8 @@ pytest tests/test_agents.py -v
 pytest --no-cov
 ```
 
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs the full suite on every pull request and push to `main`, including the Postgres tests below against a pgvector service.
+
 The suite always uses the in-memory backend, even if your `.env` sets `DATABASE_URL`. To run the persistence, cross-user isolation, pgvector and memory tests against real Postgres, point them at a **disposable** database (the tests truncate its tables):
 
 ```bash
@@ -278,7 +280,7 @@ FINNIE_TEST_DATABASE_URL=postgresql://user@localhost:5432/finnie_test pytest tes
 
 ### Evals (`tests/evals/`)
 
-A separate suite covering RAG retrieval quality, router accuracy, guardrail behavior, resilience (circuit breaker), and disclaimer/answer-quality checks. These build a real FAISS index from the knowledge base and some cases call the live Anthropic API — run them on demand rather than in CI:
+A separate suite covering RAG retrieval quality, router accuracy, guardrail behavior, resilience (circuit breaker), and disclaimer/answer-quality checks. These build a real FAISS index from the knowledge base. CI runs the offline cases; the cases that call the live Anthropic API skip unless opted in:
 
 ```bash
 pytest tests/evals -v
@@ -292,7 +294,7 @@ FINNIE_EVAL_LIVE=1 pytest tests/evals/test_memory_evals.py -v -s         # extra
 FINNIE_TEST_DATABASE_URL=postgresql://user@localhost:5432/finnie_test pytest tests/evals/test_rag_backend_parity.py -s   # pgvector vs FAISS retrieval quality
 ```
 
-The router evals exercise the legacy `router_node`, not the merged classifier that is now the default.
+The mocked router evals exercise the legacy `router_node`. The live ones (`FINNIE_EVAL_LIVE=1`) and `run_phoenix_evals.py --routing` route through the merged classifier, as production does.
 
 For LLM-as-judge routing accuracy and prompt/answer-quality reports (optionally traced to Phoenix), use the standalone script instead:
 

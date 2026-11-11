@@ -9,6 +9,7 @@ from src.core.config import get_settings
 from src.utils.cache import get_cache
 from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
+from src.utils.redact import describe_request_error, redact
 
 logger = get_logger(__name__)
 
@@ -23,7 +24,6 @@ FRED_SERIES = {
     "inflation_expectations": "T5YIE",
     "10yr_treasury": "GS10",
     "30yr_mortgage": "MORTGAGE30US",
-    "sp500_pe_ratio": "MULTPL/SHILLER_PE_RATIO_MONTH",
     "vix": "VIXCLS",
     "m2_money_supply": "M2SL",
 }
@@ -55,8 +55,10 @@ class FredClient:
             return resp.json()
         except Exception as exc:
             breaker.record_failure()
-            logger.error("fred_request_error", endpoint=endpoint, error=str(exc))
-            return {"error": str(exc)}
+            # The key is a query parameter, so str(exc) holds it inside the URL.
+            logger.error("fred_request_error", endpoint=endpoint,
+                         series_id=params.get("series_id"), error=redact(str(exc), [self._api_key]))
+            return {"error": describe_request_error(exc, [self._api_key])}
 
     def get_series_latest(self, series_id: str) -> dict[str, Any]:
         """Return the most recent observation for a series."""
@@ -110,7 +112,8 @@ class FredClient:
 
     def get_macro_snapshot(self) -> dict[str, Any]:
         """Return latest values for key macro indicators."""
-        key = self._cache.cache_key("fred", "macro_snapshot")
+        # "v2": snapshots cached before the key redaction fix held the FRED key in an error entry.
+        key = self._cache.cache_key("fred", "macro_snapshot", "v2")
         cached = self._cache.get(key)
         if cached:
             return cached

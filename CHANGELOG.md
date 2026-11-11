@@ -14,6 +14,9 @@ Without that line, the PR title is used, and the type is guessed from its first 
 ### Added
 - CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
 
+### Fixed
+- API keys no longer appear in logs or in error text that reaches answers ([#38](https://github.com/vijaybhorems/finnie/pull/38))
+
 ## 2026-11
 
 ### Added

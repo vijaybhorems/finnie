@@ -225,6 +225,7 @@ def _initial_state(
     user_message: str,
     conversation_history: list | None,
     user_profile: dict | None,
+    channel: str = "chat",
 ) -> FinnieState:
     from src.core.state import FinancialData
 
@@ -236,6 +237,7 @@ def _initial_state(
         messages=history,
         user_profile=profile,
         financial_data=FinancialData(),
+        channel=channel,
     )
 
 
@@ -256,6 +258,7 @@ def _prepare_turn(
     user_profile: dict | None,
     user_id: Optional[str],
     thread_id: Optional[str],
+    channel: str = "chat",
 ) -> tuple[Any, Any, dict[str, Any], list]:
     """Pick the graph variant and build (graph, input, config, fallback_messages)."""
     configurable: dict[str, Any] = {}
@@ -272,11 +275,12 @@ def _prepare_turn(
         turn = {
             **turn_state_reset(),
             "user_profile": profile,
+            "channel": channel,
             "messages": [HumanMessage(content=user_message)],
         }
         return build_graph(persistent=True), turn, {"configurable": configurable}, turn["messages"]
 
-    state = _initial_state(user_message, conversation_history, user_profile)
+    state = _initial_state(user_message, conversation_history, user_profile, channel)
     return build_graph(), state, {"configurable": configurable}, state.messages
 
 
@@ -318,6 +322,7 @@ def run_workflow(
     *,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
+    channel: str = "chat",
 ) -> dict[str, Any]:
     """
     Main entry point for running a single turn through the workflow.
@@ -328,12 +333,14 @@ def run_workflow(
     thread_id  a persistent conversation owned by `user_id`. The history comes
                from the checkpoint, so `conversation_history` is ignored.
                Omit for a one-shot turn.
+    channel    "chat" (default) or "voice": a spoken answer, kept short and
+               kept out of the shared FAQ cache.
 
     Returns a dict with keys: final_response, agent_used, router_reasoning,
     financial_data, rag_context, cache_hit, messages.
     """
     graph, turn, config, fallback = _prepare_turn(
-        user_message, conversation_history, user_profile, user_id, thread_id
+        user_message, conversation_history, user_profile, user_id, thread_id, channel
     )
     try:
         result = graph.invoke(turn, config)
@@ -350,6 +357,7 @@ def stream_workflow(
     *,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
+    channel: str = "chat",
 ) -> Iterator[str]:
     """Yield the answer as it is generated; fill `sink` with the full result.
 
@@ -360,7 +368,7 @@ def stream_workflow(
     is flushed once the graph finishes.
     """
     graph, turn, config, fallback = _prepare_turn(
-        user_message, conversation_history, user_profile, user_id, thread_id
+        user_message, conversation_history, user_profile, user_id, thread_id, channel
     )
     streamed: list[str] = []
     final_state: dict[str, Any] = {}

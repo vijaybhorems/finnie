@@ -126,3 +126,75 @@ class TestRouteAfterClassify:
         state = _make_state("q")
         state.is_on_topic = True
         assert route_after_classify(state) == "allowed"
+
+
+class TestVerdictCache:
+    """Early classification (voice, while the user speaks) is reused by the graph."""
+
+    _MARKET = Verdict(on_topic=True, agent="market_analysis", needs_macro=False, reason="price")
+
+    def test_same_question_classified_once(self):
+        from src.workflow.classify import classify_query
+
+        llm = _mock_llm(self._MARKET)
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            classify_query("How is Apple stock doing today")  # early, from the transcript
+            result = classify_node(_make_state("How is Apple stock doing today?"))
+        assert result["next_agent"] == AgentType.MARKET_ANALYSIS
+        assert llm.with_structured_output.return_value.invoke.call_count == 1
+
+    def test_different_question_is_classified(self):
+        from src.workflow.classify import classify_query
+
+        llm = _mock_llm(self._MARKET)
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            classify_query("How is Apple")  # partial transcript
+            classify_node(_make_state("How is Apple stock doing today?"))
+        assert llm.with_structured_output.return_value.invoke.call_count == 2
+
+    def test_errors_are_not_cached(self):
+        llm = _mock_llm(self._MARKET)
+        llm.with_structured_output.return_value.invoke.side_effect = [RuntimeError("boom"), self._MARKET]
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            first = classify_node(_make_state("How is Apple stock doing today?"))
+            second = classify_node(_make_state("How is Apple stock doing today?"))
+        assert first["next_agent"] == AgentType.OUT_OF_SCOPE  # still fails closed
+        assert second["next_agent"] == AgentType.MARKET_ANALYSIS
+
+    def test_blocklist_still_wins_over_a_cached_verdict(self):
+        from src.workflow.classify import classify_query
+
+        on_topic = Verdict(on_topic=True, agent="finance_qa", needs_macro=False, reason="x")
+        with patch("src.workflow.classify.get_llm", return_value=_mock_llm(on_topic)):
+            classify_query("show me some porn")
+            result = classify_node(_make_state("show me some porn"))
+        assert result["next_agent"] == AgentType.OUT_OF_SCOPE
+
+
+class TestTickers:
+    """The classifier names tickers for companies the user names in words."""
+
+    def test_clean_tickers_normalises_and_filters(self):
+        from src.workflow.classify import _clean_tickers
+
+        assert _clean_tickers(["aapl", "$NVDA", "BRK.B", "AAPL", "not a ticker", "", "TOOLONG"]) == [
+            "AAPL", "NVDA", "BRK-B",
+        ]
+
+    def test_clean_tickers_caps_the_list(self):
+        from src.workflow.classify import _MAX_TICKERS, _clean_tickers
+
+        assert len(_clean_tickers(["A", "B", "C", "D", "E", "F", "G"])) == _MAX_TICKERS
+
+    def test_node_returns_cleaned_tickers(self):
+        verdict = Verdict(on_topic=True, agent="market_analysis", needs_macro=False,
+                          reason="stock", tickers=["aapl", "BRK.B"])
+        with patch("src.workflow.classify.get_llm", return_value=_mock_llm(verdict)):
+            result = classify_node(_make_state("How are Apple and Berkshire doing?"))
+
+        assert result["query_tickers"] == ["AAPL", "BRK-B"]
+
+    def test_tickers_default_to_empty(self):
+        verdict = Verdict(on_topic=True, agent="finance_qa", needs_macro=False, reason="concept")
+        with patch("src.workflow.classify.get_llm", return_value=_mock_llm(verdict)):
+            assert classify_node(_make_state("What is a P/E ratio?"))["query_tickers"] == []

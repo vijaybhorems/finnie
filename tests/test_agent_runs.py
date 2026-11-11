@@ -145,3 +145,32 @@ class TestEveryAgentRuns:
         sent = llm.calls[0]
         assert sent[0].type == "system"
         assert sent[-1].type == "human" and sent[-1].content == query
+
+
+class TestMarketTickersFromClassifier:
+    """'How is Apple doing?' names no symbol; the classifier's AAPL must be fetched."""
+
+    def _run(self, query: str, tickers: list[str]):
+        from src.agents.market_analysis_agent import MarketAnalysisAgent
+
+        state = _state(query)
+        state.query_tickers = tickers
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.agents.base_agent.get_llm", return_value=_fake_llm()))
+            yf = stack.enter_context(patch("src.agents.market_analysis_agent.YFinanceClient"))
+            yf.return_value.get_current_price.return_value = _PRICE
+            yf.return_value.get_sector_performance.return_value = _SECTORS
+            av = stack.enter_context(patch("src.agents.market_analysis_agent.AlphaVantageClient"))
+            av.return_value.get_rsi.return_value = {"rsi": 58.2, "signal": "neutral"}
+            MarketAnalysisAgent().run(state)
+        prices = {c.args[0] for c in yf.return_value.get_current_price.call_args_list}
+        rsi = {c.args[0] for c in av.return_value.get_rsi.call_args_list}
+        return prices, rsi
+
+    def test_company_name_ticker_is_fetched(self):
+        prices, rsi = self._run("How is Apple stock doing today?", ["AAPL"])
+        assert "AAPL" in prices and "AAPL" in rsi
+
+    def test_without_classifier_tickers_a_name_fetches_nothing_extra(self):
+        prices, rsi = self._run("How is Apple stock doing today?", [])
+        assert "AAPL" not in prices and not rsi

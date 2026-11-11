@@ -11,6 +11,9 @@ Without that line, the PR title is used, and the type is guessed from its first 
 
 ## Unreleased
 
+### Added
+- CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
+
 ## 2026-11
 
 ### Added

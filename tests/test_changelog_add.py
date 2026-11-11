@@ -81,5 +81,7 @@ class TestAddEntry:
 def test_real_changelog_accepts_an_entry():
     real = (_ROOT / "CHANGELOG.md").read_text()
     out = add(real, 9999, "Add something new")
-    assert "### Added\n- Add something new" in unreleased(out)
-    assert out.replace(f"### Added\n- Add something new ([#9999]({URL}9999))\n\n", "", 1) == real
+    line = f"- Add something new ([#9999]({URL}9999))\n"
+    assert line in unreleased(out)
+    # Only the new line (and, if Unreleased had no Added heading yet, that heading) was added.
+    assert out.replace(line, "", 1) in (real, real.replace("## Unreleased\n\n", "## Unreleased\n\n### Added\n\n", 1))

@@ -10,6 +10,7 @@ from src.core.config import get_settings
 from src.utils.cache import get_cache
 from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
+from src.utils.redact import describe_request_error, redact
 
 logger = get_logger(__name__)
 
@@ -53,8 +54,10 @@ class AlphaVantageClient:
             return data
         except Exception as exc:
             breaker.record_failure()
-            logger.error("alpha_vantage_request_error", error=str(exc), params=params)
-            return {"error": str(exc)}
+            # The key is a query parameter: keep it out of the logged params and the error text.
+            logger.error("alpha_vantage_request_error", error=redact(str(exc), [self._api_key]),
+                         params={k: v for k, v in params.items() if k != "apikey"})
+            return {"error": describe_request_error(exc, [self._api_key])}
 
     def get_quote(self, ticker: str) -> dict[str, Any]:
         """Global quote — latest price, volume, change%."""

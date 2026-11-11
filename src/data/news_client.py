@@ -10,6 +10,7 @@ from src.core.config import get_settings
 from src.utils.cache import get_cache
 from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
+from src.utils.redact import redact
 
 logger = get_logger(__name__)
 
@@ -59,12 +60,12 @@ class NewsClient:
                 f"{self._base_url}/everything",
                 params={
                     "q": query,
-                    "apiKey": self._api_key,
                     "language": "en",
                     "sortBy": "publishedAt",
                     "pageSize": str(page_size),
                     "domains": "reuters.com,bloomberg.com,cnbc.com,wsj.com,ft.com",
                 },
+                headers={"X-Api-Key": self._api_key},  # a header, so the key is never in a URL
                 timeout=10,
             )
             resp.raise_for_status()
@@ -85,7 +86,7 @@ class NewsClient:
             return results
         except Exception as exc:
             breaker.record_failure()
-            logger.error("newsapi_error", error=str(exc))
+            logger.error("newsapi_error", error=redact(str(exc), [self._api_key]))
             return self._get_rss_headlines()
 
     def _get_rss_headlines(self, max_per_feed: int = 5) -> list[dict[str, Any]]:

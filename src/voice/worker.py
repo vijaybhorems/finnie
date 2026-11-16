@@ -620,8 +620,10 @@ async def entrypoint(ctx: JobContext) -> None:
             "turn_detection": EnglishModel(),
             "endpointing": {"min_delay": voice.endpointing_min_delay, "max_delay": voice.endpointing_max_delay},
             # "uh-huh" while Finnie speaks shouldn't stop the answer; a cut-in
-            # with no words resumes it.
+            # with no words resumes it. Named outright: LiveKit leaves adaptive
+            # off for self-hosted workers in production unless asked.
             "interruption": {
+                "mode": voice.interruption_mode,
                 "min_duration": voice.interruption_min_duration,
                 "min_words": voice.interruption_min_words,
                 "resume_false_interruption": True,

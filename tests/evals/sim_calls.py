@@ -168,17 +168,19 @@ _SPOKEN_FIGURE = re.compile(r"\$\s?\d|\b\d[\d,.]*\s*(?:dollars|bucks|k\b|thousan
 
 
 def amounts_kept_off_audio(o: Observed) -> Optional[str]:
-    """Discreet mode: no dollar figure said aloud, and "it's on your screen" only when it is.
+    """Discreet mode, every answered turn: no dollar figure said aloud, and no pointing at the screen.
 
     The page shows the voice answer's own text, which discreet mode also keeps
-    free of figures, so pointing the caller at the screen promises what isn't there.
+    free of figures, so "it's on your screen" promises what isn't there. The one
+    exception is the backstop's phrase, which only appears when a figure was
+    written (and so is on screen).
     """
-    spoken = o.last().get("spoken") or ""
-    if _SPOKEN_FIGURE.search(spoken):
-        return f"a dollar figure was spoken: {spoken[:120]!r}"
-    written = " ".join(a.get("answer") or "" for a in o.answers)
-    if "on your screen" in spoken.lower() and not re.search(r"\$\s?\d", written):
-        return f"said the figure is on screen, but the written answer has none: {spoken[:160]!r}"
+    for turn in o.answered():
+        spoken = turn.get("spoken") or ""
+        if _SPOKEN_FIGURE.search(spoken):
+            return f"a dollar figure was spoken: {spoken[:120]!r}"
+        if "screen" in spoken.lower().replace(AMOUNT_ON_SCREEN, ""):
+            return f"pointed the caller at the screen: {spoken[:160]!r}"
     return None
 
 
@@ -265,9 +267,10 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         "discreet_amounts",
-        (say("If I invest ten thousand dollars at seven percent for ten years, how much will I have?"),),
-        (all_answered, amounts_kept_off_audio),
-        "Dollar figures stay on screen unless the caller turns amounts on.",
+        (say("If I invest ten thousand dollars at seven percent for ten years, how much will I have?"),
+         say("Exactly how many dollars would ten thousand grow to at seven percent over ten years?")),
+        (graph_runs(2), all_answered, amounts_kept_off_audio),
+        "No dollar figures aloud unless the caller turns amounts on, even when asked; no \"it's on your screen\".",
     ),
     Scenario(
         "noisy_room", (say("What is a Roth IRA?", noise=True),),

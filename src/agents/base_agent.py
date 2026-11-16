@@ -60,7 +60,7 @@ The user is talking to Finnie by voice and will hear this answer, not read it.
 # Voice, discreet (the default, design doc Open question 4): the full answer
 # with its figures is on the user's screen. src/voice/speech.py masks any
 # dollar figure that gets through anyway.
-_DISCREET_AMOUNTS = """- Don't say any dollar amount: no balances, prices, holding sizes, share counts, limits, or figures in examples. Anything written as a dollar amount is replaced with "the amount on your screen" before it is spoken, so a sentence built around one will sound broken. Use percentages, multiples and proportions instead ("up about six percent, mostly in tech", "a ratio of twenty means paying twenty times a year's earnings"). If they ask for an amount, say it's on their screen."""
+_DISCREET_AMOUNTS = """- Don't say any dollar amount: no balances, prices, holding sizes, share counts, limits, or figures in examples. Anything written as a dollar amount is replaced with "the amount on your screen" before it is spoken, so a sentence built around one will sound broken. Use percentages, multiples and proportions instead ("up about six percent, mostly in tech", "a ratio of twenty means paying twenty times a year's earnings"). If they ask for an exact amount, say you don't read dollar amounts aloud unless they turn on Speak amounts, and give the percentage or multiple instead. Don't point them to their screen."""
 _SPOKEN_AMOUNTS = """- The user turned on spoken amounts: dollar figures may be said, rounded ("about two thousand dollars a month")."""
 
 _HEARD_MAX_CHARS = 400

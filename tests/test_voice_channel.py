@@ -113,6 +113,11 @@ class TestSpeakAmounts:
         context = self._context()
         assert _DISCREET_AMOUNTS in context and _SPOKEN_AMOUNTS not in context
 
+    def test_discreet_never_sends_the_caller_to_the_screen(self):
+        """The page shows this same figure-free answer: "it's on your screen" would be false."""
+        assert "Don't point them to their screen" in _DISCREET_AMOUNTS
+        assert "say it's on their screen" not in _DISCREET_AMOUNTS
+
     def test_amounts_when_turned_on(self):
         context = self._context(speak=True)
         assert _SPOKEN_AMOUNTS in context and _DISCREET_AMOUNTS not in context

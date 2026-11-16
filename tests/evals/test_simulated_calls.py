@@ -10,6 +10,11 @@ Run with the voice venv, the local LiveKit server up and no other worker running
     FINNIE_EVAL_CALLS=1 .venv-voice/bin/python -m pytest tests/evals/test_simulated_calls.py -v -s --no-cov
     FINNIE_EVAL_CALLS=1 FINNIE_EVAL_CALL_SCENARIOS=basic,interruption .venv-voice/bin/python -m pytest ...
 
+Against LiveKit Cloud instead (adaptive interruption only works there: on the
+dev server it falls back to VAD and `backchannel` fails), export LIVEKIT_URL,
+LIVEKIT_API_KEY and LIVEKIT_API_SECRET in the shell first; the caller and the
+worker both use them.
+
 Cost: roughly 5-15 cents a scenario (speech, Claude, LiveKit minutes), about
 $1.50 for all of them. Writes tests/evals/.sim_runs/report.json (git-ignored).
 """
@@ -62,10 +67,12 @@ def real_keys(monkeypatch):
         pytest.skip("ANTHROPIC_API_KEY missing from .env")
     monkeypatch.setenv("ANTHROPIC_API_KEY", key)
     # The caller mints through the app's minter (spike/voice/local_token.py) in this process.
-    for name, value in (("FINNIE_VOICE_ENABLED", "1"), ("FINNIE_VOICE_ALLOWED_EMAILS", "tester@example.com"),
-                        ("LIVEKIT_URL", "ws://localhost:7880"), ("LIVEKIT_API_KEY", "devkey"),
-                        ("LIVEKIT_API_SECRET", "secret")):
-        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("FINNIE_VOICE_ENABLED", "1")
+    monkeypatch.setenv("FINNIE_VOICE_ALLOWED_EMAILS", "tester@example.com")
+    # The local dev server unless the shell names another (LiveKit Cloud, for adaptive interruption).
+    for name, dev in (("LIVEKIT_URL", "ws://localhost:7880"), ("LIVEKIT_API_KEY", "devkey"),
+                      ("LIVEKIT_API_SECRET", "secret")):
+        monkeypatch.setenv(name, os.environ.get(name, dev))
     from src.core.config import get_settings
     get_settings.cache_clear()
 

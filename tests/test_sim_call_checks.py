@@ -110,10 +110,12 @@ class TestWhatWasSpoken:
         o = call(turn(spoken="It roughly doubles."), answers=[{"answer": "It roughly doubles."}])
         assert amounts_kept_off_audio(o) is None
 
-    def test_pointing_at_an_empty_screen_fails(self):
-        o = call(turn(spoken="It roughly doubles. The exact projection is on your screen."),
-                 answers=[{"answer": "It roughly doubles. The exact projection is on your screen."}])
-        assert "written answer has none" in amounts_kept_off_audio(o)
+    def test_pointing_at_the_screen_fails_on_any_turn(self):
+        o = call(turn(spoken="The exact projection is on your screen."), turn(spoken="It roughly doubles."))
+        assert "pointed the caller at the screen" in amounts_kept_off_audio(o)
+
+    def test_a_spoken_figure_on_an_earlier_turn_fails(self):
+        assert "spoken" in amounts_kept_off_audio(call(turn(spoken="About $19,671."), turn()))
 
 
 class TestCallEnd:

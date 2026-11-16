@@ -251,6 +251,10 @@ class VoiceConfig(BaseModel):
     endpointing_max_delay: float = 3.0   # longest wait for a mid-question pause
     interruption_min_duration: float = 0.5  # shorter speech ("uh-huh") doesn't interrupt
     interruption_min_words: int = 0
+    # "adaptive": LiveKit's audio model tells "uh-huh" from a real cut-in. It runs on
+    # LiveKit Cloud inference with the LiveKit keys (self-hosted workers: 40,000
+    # requests a month free, then billed) and falls back to "vad" if it can't be reached.
+    interruption_mode: Literal["adaptive", "vad"] = "adaptive"
     false_interruption_timeout: float = 2.0  # resume if the "interruption" had no words
     # Failures (src/voice/turns.py, health.py).
     stt_stall_seconds: float = 3.0     # speech with no transcript this long after it ends

@@ -151,6 +151,7 @@ voice:
   endpointing_max_delay: 3.0
   interruption_min_duration: 0.5
   interruption_min_words: 0
+  interruption_mode: adaptive  # LiveKit Cloud's backchannel model; "vad" = any speech over 0.5 s interrupts
   false_interruption_timeout: 2.0
   stt_stall_seconds: 3.0      # "I'm having trouble hearing you"
   stt_stalls_to_end: 2

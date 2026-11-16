@@ -145,6 +145,18 @@ voice:
   idle_hangup_seconds: 120
   max_turns_per_call: 60
   daily_minutes_per_user: 30
+  endpointing_min_delay: 0.5
+  endpointing_max_delay: 3.0
+  interruption_min_duration: 0.5
+  interruption_min_words: 0
+  false_interruption_timeout: 2.0
+  stt_stall_seconds: 3.0      # "I'm having trouble hearing you"
+  stt_stalls_to_end: 2
+  vendor_error_tolerance: 15  # failed reconnects before LiveKit itself closes the call
+  slow_turn_notice_seconds: 8 # "This is taking longer than usual"
+  slow_turn_abandon_seconds: 20
+  tts_fallback_model: "aura-2-asteria-en"  # Deepgram Aura: a second vendor for speech
+  tts_connect_timeout_seconds: 2.0
 
 planning:
   default_inflation: 0.03  # used for real (inflation-adjusted) projection view

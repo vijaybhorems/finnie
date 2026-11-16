@@ -72,6 +72,11 @@ class FinnieState(BaseModel):
     # cache (shared with chat) is neither read nor written. Set per turn.
     channel: Literal["chat", "voice"] = "chat"
 
+    # Voice only: what the user heard of the previous answer before cutting in.
+    # The saved answer is the full text, so the agent is told where the user
+    # stopped listening. Set per turn (reset by turn_state_reset like the rest).
+    interrupted_after: Optional[str] = None
+
     # User context
     user_profile: UserProfile = Field(default_factory=UserProfile)
 

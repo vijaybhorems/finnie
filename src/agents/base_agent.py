@@ -56,6 +56,21 @@ The user is talking to Finnie by voice and will hear this answer, not read it.
 - If the topic needs more, end with one short offer to go deeper on a specific part, as a question.
 - This overrides any length or formatting guidance above. The rules about not recommending specific securities still apply."""
 
+_HEARD_MAX_CHARS = 400
+
+
+def _interrupted_note(heard: str) -> str:
+    """Where the user stopped listening to the previous (saved, complete) answer."""
+    heard = " ".join(heard.split())
+    if len(heard) > _HEARD_MAX_CHARS:
+        heard = "…" + heard[-_HEARD_MAX_CHARS:]
+    return (
+        "## The user interrupted your last answer\n"
+        f'They heard only this much of it before speaking: "{heard}"\n'
+        "Don't assume they heard the rest. Answer what they just said."
+    )
+
+
 class BaseAgent(ABC):
     """Abstract base for all Finnie agents."""
 
@@ -116,6 +131,8 @@ class BaseAgent(ABC):
         # Per-request, so it goes in block 3 and never touches the cached prefix.
         if state.channel == "voice":
             context = f"{context.strip()}\n\n{_VOICE_INSTRUCTION}"
+        if state.interrupted_after:
+            context = f"{context.strip()}\n\n{_interrupted_note(state.interrupted_after)}"
         # The API rejects empty text blocks, so an agent with no per-request
         # context sends only the two stable blocks.
         if context.strip():

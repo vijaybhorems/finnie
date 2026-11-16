@@ -34,6 +34,7 @@ os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
 
 from livekit.agents import (  # noqa: E402
     Agent,
+    APIConnectOptions,
     AgentServer,
     AgentSession,
     JobContext,
@@ -41,8 +42,10 @@ from livekit.agents import (  # noqa: E402
     ModelSettings,
     cli,
     llm,
+    tts,
 )
 from livekit.agents.types import FlushSentinel  # noqa: E402
+from livekit.agents.voice.agent_session import SessionConnectOptions  # noqa: E402
 from livekit.plugins import deepgram, elevenlabs, silero  # noqa: E402
 from livekit.plugins.turn_detector.english import EnglishModel  # noqa: E402
 
@@ -50,8 +53,20 @@ from src.core.config import get_settings  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 from src.voice.access import VOICE_UNAVAILABLE, check_join, new_voice_room  # noqa: E402
 from src.voice.limits import DAILY_LIMIT, ENDS_CALL, LINES, TURN_LIMIT, CallMonitor  # noqa: E402
-from src.voice.prefetch import FILLERS, warm_shared_data  # noqa: E402
-from src.voice.speech import SESSION_DISCLAIMER, SpeechBuffer, strip_written_disclaimer  # noqa: E402
+from src.voice.health import DEEPGRAM, ELEVENLABS, VendorHealth  # noqa: E402
+from src.voice.prefetch import warm_shared_data  # noqa: E402
+from src.voice.speech import SESSION_DISCLAIMER  # noqa: E402
+from src.voice.turns import (  # noqa: E402
+    END,
+    HEARING_GIVE_UP,
+    HEARING_TROUBLE,
+    STANDALONE_LINES,
+    StallWatch,
+    TurnOutcome,
+    heard_answer,
+    preamble,
+    spoken_answer,
+)
 
 logger = get_logger("finnie.voice")
 
@@ -91,7 +106,6 @@ KEYTERMS = [
     "tax-loss harvesting", "wash sale", "FIRE", "Finnie",
 ]
 
-_SENTINEL = object()
 
 
 class GraphLLM(llm.LLM):
@@ -122,6 +136,7 @@ class FinnieVoiceAgent(Agent):
         self.user_id = user_id
         self.thread_id = thread_id  # the room name: its own thread per call (Open question 1)
         self.monitor: CallMonitor | None = None  # set by the entrypoint; None in tests
+        self._heard_before_interrupt: str | None = None
         self.turns: list[dict[str, Any]] = []
         # Speculation state for the turn being spoken.
         self._finals: list[str] = []
@@ -185,20 +200,24 @@ class FinnieVoiceAgent(Agent):
 
     # ── The turn ────────────────────────────────────────────────────────────
 
-    async def _filler_for(self, question: str) -> str | None:
-        """A short line to say first on slow turns, once the route is known."""
+    async def _preamble_for(self, question: str) -> list[str]:
+        """Lines to say before the answer: the filler, and the securities line."""
         from src.workflow.classify import classify_query
         from src.workflow.guardrail import _matches_blocklist
 
-        if not FILLER or _matches_blocklist(question):
-            return None
+        if _matches_blocklist(question):
+            return []
         try:
             # Usually instant: classified while the user was speaking. If not,
             # this is the turn's one classifier call; the graph reuses it.
             verdict = await asyncio.to_thread(classify_query, question)
-        except Exception:  # noqa: BLE001 — no filler; the graph fails closed on its own call
-            return None
-        return FILLERS.get(verdict.agent) if verdict.on_topic else None
+        except Exception:  # noqa: BLE001 — the graph classifies again and fails closed
+            return []
+        return preamble(verdict, filler=FILLER)
+
+    def note_interrupted(self, spoken: str) -> None:
+        """The user cut in; tell the next turn what they heard of the answer."""
+        self._heard_before_interrupt = heard_answer(spoken) or None
 
     async def llm_node(
         self,
@@ -216,18 +235,19 @@ class FinnieVoiceAgent(Agent):
             if not self.monitor.start_turn():
                 yield TURN_LIMIT  # instead of answering; _enforce_limits ends the call after it
                 return
+        heard, self._heard_before_interrupt = self._heard_before_interrupt, None
         started = time.perf_counter()
-        filler = await self._filler_for(question)
+        lines = await self._preamble_for(question)
         verdict_s = round(time.perf_counter() - started, 3)
-        if filler:
-            yield filler
+        for line in lines:
+            yield line
             # Speak it now. Without this, ElevenLabs' sentence splitter holds the
-            # filler until the answer's first words arrive, which defeats it.
+            # line until the answer's first words arrive, which defeats it.
             yield FlushSentinel()
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sink: dict[str, Any] = {}
-        timing = {"started": time.perf_counter(), "first_token": None}
+        timing = {"started": time.perf_counter()}
 
         def produce() -> None:
             from src.workflow.graph import stream_workflow
@@ -235,41 +255,50 @@ class FinnieVoiceAgent(Agent):
             try:
                 for token in stream_workflow(
                     question, sink=sink, user_id=self.user_id, thread_id=self.thread_id,
-                    channel="voice",
+                    channel="voice", interrupted_after=heard,
                 ):
-                    if timing["first_token"] is None:
-                        timing["first_token"] = time.perf_counter()
                     loop.call_soon_threadsafe(queue.put_nowait, token)
+            except Exception as exc:  # noqa: BLE001 — stream_workflow reports its own errors
+                logger.warning("voice_turn_error", error=type(exc).__name__)
+                sink.setdefault("agent_used", "error")
+                loop.call_soon_threadsafe(queue.put_nowait, "")
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+                loop.call_soon_threadsafe(queue.put_nowait, END)
 
         # The graph is synchronous; run it beside the event loop. On interruption
-        # LiveKit stops consuming this generator, and the run finishes on its own
+        # or an abandoned turn this generator stops reading, and the run finishes
+        # on its own: cancelling it would leave the question with no answer
         # (design doc: "When the user interrupts").
         threading.Thread(target=produce, name="finnie-turn", daemon=True).start()
 
-        buffer = SpeechBuffer()
-        completed = False
+        voice = get_settings().voice
+        outcome = TurnOutcome()
         try:
-            while (token := await queue.get()) is not _SENTINEL:
-                spoken = buffer.push(strip_written_disclaimer(token))
-                if spoken.strip():
-                    yield spoken
-            tail = buffer.flush()
-            if tail.strip():
-                yield tail
-            completed = True
+            async for spoken in spoken_answer(
+                queue.get, outcome,
+                notice_s=voice.slow_turn_notice_seconds,
+                abandon_s=voice.slow_turn_abandon_seconds,
+                failed=lambda: sink.get("agent_used") == "error",
+            ):
+                yield spoken
+                if spoken in STANDALONE_LINES:
+                    yield FlushSentinel()
         finally:
             # Runs on interruption too (LiveKit closes this generator), so an
             # interrupted turn logs its own timings, not the previous turn's.
+            if outcome.abandoned or outcome.failed:
+                logger.warning("voice_turn_not_answered", abandoned=outcome.abandoned, failed=outcome.failed)
             self.turns.append({
                 "question": question,
                 "agent": sink.get("agent_used"),
                 "cache_hit": sink.get("cache_hit"),
-                "finnie_first_token_s": _elapsed(timing["started"], timing["first_token"]),
+                "finnie_first_token_s": outcome.first_token_s,
                 "finnie_total_s": round(time.perf_counter() - timing["started"], 3),
-                "finnie_completed": completed,
-                "filler": filler,
+                "finnie_completed": outcome.completed,
+                "abandoned": outcome.abandoned,
+                "failed": outcome.failed,
+                "preamble": lines,
+                "after_interruption": heard is not None,
                 "verdict_s": verdict_s,  # ~0 when classified while the user spoke
                 "speculate": SPECULATE,
             })
@@ -280,10 +309,6 @@ def _last_user_text(chat_ctx: llm.ChatContext) -> str:
         if getattr(item, "role", None) == "user":
             return (item.text_content or "").strip()
     return ""
-
-
-def _elapsed(start: float, end: float | None) -> float | None:
-    return round(end - start, 3) if end is not None else None
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -299,17 +324,50 @@ def prewarm(proc: JobProcess) -> None:
 server = AgentServer(setup_fnc=prewarm, initialize_process_timeout=120)
 
 
-async def _refuse(ctx: JobContext, reason: str, line: str = VOICE_UNAVAILABLE) -> None:
+def _voices(health: VendorHealth) -> list[tts.TTS]:
+    """The main voice, then the backup from another vendor; open breakers left out."""
+    voice = get_settings().voice
+    voices: list[tts.TTS] = []
+    if not health.is_open(ELEVENLABS):
+        kwargs: dict[str, Any] = {"model": voice.tts_model}
+        if voice.tts_voice_id:
+            kwargs["voice_id"] = voice.tts_voice_id
+        voices.append(elevenlabs.TTS(**kwargs))
+    if not health.is_open(DEEPGRAM):
+        voices.append(deepgram.TTS(model=voice.tts_fallback_model, mip_opt_out=True))
+    return voices
+
+
+def _vendor_of(source: Any = None, error: Any = None) -> str | None:
+    """Which vendor a plugin, or a LiveKit STTError/TTSError (by its label), belongs to."""
+    if isinstance(source, (deepgram.STT, deepgram.TTS)):
+        return DEEPGRAM
+    if isinstance(source, elevenlabs.TTS):
+        return ELEVENLABS
+    label = str(getattr(error, "label", "")).lower()
+    if "deepgram" in label or getattr(error, "type", "") == "stt_error":
+        return DEEPGRAM
+    if "elevenlabs" in label:
+        return ELEVENLABS
+    return None
+
+
+async def _refuse(
+    ctx: JobContext, reason: str, line: str = VOICE_UNAVAILABLE, health: VendorHealth | None = None,
+) -> None:
     """Say `line` and end the call. Nothing is saved for a refused call."""
     logger.warning("voice_join_refused", reason=reason)
-    session = AgentSession(tts=elevenlabs.TTS(model=get_settings().voice.tts_model))
+    voices = _voices(health or VendorHealth())
+    session = AgentSession(tts=voices[0]) if voices else None
     try:
-        await session.start(agent=Agent(instructions="Refusing this call."), room=ctx.room)
-        await session.say(line, allow_interruptions=False, add_to_chat_ctx=False)
+        if session is not None:  # no working voice: the call just ends
+            await session.start(agent=Agent(instructions="Refusing this call."), room=ctx.room)
+            await session.say(line, allow_interruptions=False, add_to_chat_ctx=False)
     except Exception as exc:  # noqa: BLE001 — the call still ends, just without the line
         logger.warning("voice_refusal_line_failed", error=type(exc).__name__)
     finally:
-        await session.aclose()
+        if session is not None:
+            await session.aclose()
         await ctx.delete_room()
         ctx.shutdown(reason=f"refused: {reason}")
 
@@ -345,8 +403,21 @@ async def _end_call(session: AgentSession, reason: str) -> None:
     await session.aclose()
 
 
-async def _enforce_limits(session: AgentSession, monitor: CallMonitor, usage: _Usage) -> None:
-    """Once a second: save usage now and then, and act on the call's limits."""
+async def _say_and_end(session: AgentSession, line: str, reason: str) -> None:
+    try:
+        session.interrupt(force=True)  # don't finish a long answer first
+    except RuntimeError:
+        pass  # nothing playing
+    try:
+        await session.say(line, allow_interruptions=False, add_to_chat_ctx=False)
+    finally:
+        await _end_call(session, reason)
+
+
+async def _enforce_limits(
+    session: AgentSession, monitor: CallMonitor, usage: _Usage, stalls: StallWatch,
+) -> None:
+    """Once a second: save usage now and then, and act on the call's limits and stalls."""
     while True:
         await asyncio.sleep(1)
         now = time.monotonic()
@@ -355,6 +426,13 @@ async def _enforce_limits(session: AgentSession, monitor: CallMonitor, usage: _U
                 await usage.save(now)
             except Exception as exc:  # noqa: BLE001 — try again at the next flush
                 logger.warning("voice_usage_save_failed", error=type(exc).__name__)
+        stall = stalls.tick(now)
+        if stall is not None:
+            logger.warning("voice_stt_stall", in_a_row=stalls.in_a_row)
+            if stall == StallWatch.END:
+                await _say_and_end(session, HEARING_GIVE_UP, "stt_stalled")
+                return
+            session.say(HEARING_TROUBLE, add_to_chat_ctx=False)
         if monitor.turn_limit_reached and not monitor.agent_busy:
             await _end_call(session, "turn_limit")  # TURN_LIMIT was said instead of an answer
             return
@@ -363,14 +441,7 @@ async def _enforce_limits(session: AgentSession, monitor: CallMonitor, usage: _U
             continue
         logger.info("voice_limit", action=action.value, elapsed_s=round(monitor.elapsed(now)))
         if action in ENDS_CALL:
-            try:
-                session.interrupt(force=True)  # don't finish a long answer past the limit
-            except RuntimeError:
-                pass  # nothing playing
-            try:
-                await session.say(LINES[action], allow_interruptions=False, add_to_chat_ctx=False)
-            finally:
-                await _end_call(session, action.value)
+            await _say_and_end(session, LINES[action], action.value)
             return
         session.say(LINES[action], add_to_chat_ctx=False)
 
@@ -394,6 +465,15 @@ async def entrypoint(ctx: JobContext) -> None:
     from src.persistence.user_data import UserData
 
     voice = get_settings().voice
+    health = VendorHealth()
+    if await asyncio.to_thread(health.is_open, DEEPGRAM):
+        # Can't hear the user: end now rather than fail mid-call.
+        await _refuse(ctx, "stt_circuit_open", health=health)
+        return
+    voices = await asyncio.to_thread(_voices, health)
+    if not voices:
+        await _refuse(ctx, "tts_circuit_open", health=health)
+        return
     data = UserData(user_id)
     used_today = await asyncio.to_thread(data.voice_seconds_today)
     monitor = CallMonitor(voice, used_today, time.monotonic())
@@ -408,16 +488,53 @@ async def entrypoint(ctx: JobContext) -> None:
     agent.monitor = monitor
     logger.info("voice_call_started", budget_s=round(monitor.budget_s))
 
-    tts_kwargs: dict[str, Any] = {"model": voice.tts_model}
-    if voice.tts_voice_id:
-        tts_kwargs["voice_id"] = voice.tts_voice_id
+    # Per-call vendor bookkeeping for the shared breakers.
+    failed: set[str] = set()
+    worked = {"heard": False, "spoke": False}
+
+    def vendor_failed(vendor: str | None, what: str) -> None:
+        if vendor and vendor not in failed:  # once per call: retries aren't separate outages
+            failed.add(vendor)
+            logger.warning("voice_vendor_failed", vendor=vendor, what=what)
+            asyncio.ensure_future(asyncio.to_thread(health.failure, vendor))
+
+    speech: tts.TTS = voices[0]
+    if len(voices) > 1:
+        # The rest of the call moves to the backup once the main voice fails.
+        speech = tts.FallbackAdapter(voices, max_retry_per_tts=1)
+
+        @speech.on("tts_availability_changed")
+        def _on_voice_availability(event: Any) -> None:
+            if not event.available:
+                vendor_failed(_vendor_of(event.tts), "tts_unavailable")
+
+    stalls = StallWatch(voice.stt_stall_seconds, voice.stt_stalls_to_end)
     session = AgentSession(
-        stt=deepgram.STT(model=voice.stt_model, language="en-US", keyterm=KEYTERMS, smart_format=True),
+        stt=deepgram.STT(
+            model=voice.stt_model, language="en-US", keyterm=KEYTERMS, smart_format=True,
+            mip_opt_out=True,  # Deepgram's model-improvement opt-out (design doc, Impact item 8)
+        ),
         llm=GraphLLM(),
-        tts=elevenlabs.TTS(**tts_kwargs),
+        tts=speech,
         vad=ctx.proc.userdata["vad"],
+        conn_options=SessionConnectOptions(
+            tts_conn_options=APIConnectOptions(timeout=voice.tts_connect_timeout_seconds),
+            # LiveKit closes the session after this many failed reconnects in a
+            # row (3 by default, ~2 s for Deepgram), before StallWatch can say
+            # anything. The worker ends the call itself, after saying why.
+            max_unrecoverable_errors=voice.vendor_error_tolerance,
+        ),
         turn_handling={
             "turn_detection": EnglishModel(),
+            "endpointing": {"min_delay": voice.endpointing_min_delay, "max_delay": voice.endpointing_max_delay},
+            # "uh-huh" while Finnie speaks shouldn't stop the answer; a cut-in
+            # with no words resumes it.
+            "interruption": {
+                "min_duration": voice.interruption_min_duration,
+                "min_words": voice.interruption_min_words,
+                "resume_false_interruption": True,
+                "false_interruption_timeout": voice.false_interruption_timeout,
+            },
             # On by default in livekit-agents 1.8; the design keeps it off because
             # a discarded run would still write the checkpoint, FAQ cache and memories.
             "preemptive_generation": {"enabled": False},
@@ -435,7 +552,12 @@ async def entrypoint(ctx: JobContext) -> None:
             pending_user.clear()
             pending_user.update(metrics)
             return
-        if role != "assistant" or not agent.turns:
+        if role != "assistant":
+            return
+        if getattr(item, "interrupted", False):
+            # LiveKit keeps only what was played in the item: tell the next turn.
+            agent.note_interrupted(item.text_content or "")
+        if not agent.turns:
             return
         record = {
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -454,7 +576,7 @@ async def entrypoint(ctx: JobContext) -> None:
             round(sum(parts), 3) if all(p is not None for p in parts) else None
         )
         # Logs never carry what the user said or the answer; the local file may.
-        logger.info("voice_turn", **{k: v for k, v in record.items() if k not in ("question", "filler", "at")})
+        logger.info("voice_turn", **{k: v for k, v in record.items() if k not in ("question", "preamble", "at")})
         if TURN_LOG:
             path = Path(TURN_LOG)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -463,17 +585,33 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("user_input_transcribed")
     def _on_transcript(event: Any) -> None:
+        if event.transcript.strip():
+            stalls.transcript()
+            worked["heard"] = True
         agent.on_transcript(event.transcript, event.is_final)
 
     @session.on("user_state_changed")
     def _on_user_state(event: Any) -> None:
-        monitor.set_user_speaking(event.new_state == "speaking", time.monotonic())
+        now = time.monotonic()
+        monitor.set_user_speaking(event.new_state == "speaking", now)
         if event.new_state == "speaking":
+            stalls.speech_started(now)
             agent.on_user_speaking()
+        elif getattr(event, "old_state", None) == "speaking":
+            stalls.speech_ended(now)
 
     @session.on("agent_state_changed")
     def _on_agent_state(event: Any) -> None:
         monitor.set_agent_busy(event.new_state in ("thinking", "speaking"), time.monotonic())
+        if event.new_state == "speaking":
+            worked["spoke"] = True
+
+    @session.on("error")
+    def _on_error(event: Any) -> None:
+        vendor = _vendor_of(event.source, event.error)
+        vendor_failed(vendor, type(event.error).__name__)
+        if getattr(event.error, "type", "") == "stt_error":
+            stalls.failure(time.monotonic())
 
     tasks: dict[str, asyncio.Task] = {}
 
@@ -483,12 +621,20 @@ async def entrypoint(ctx: JobContext) -> None:
             limits.cancel()
         await usage.finish(time.monotonic())
         logger.info("voice_call_ended", reason=reason, seconds=round(time.monotonic() - usage.started))
+        # A vendor that did its job this call closes its breaker (a half-open probe passed).
+        ok = {DEEPGRAM} if worked["heard"] else set()
+        if worked["spoke"]:
+            ok.add(_vendor_of(voices[0]) or ELEVENLABS)
+        for vendor in ok - failed:
+            await asyncio.to_thread(health.success, vendor)
         await ctx.delete_room()
         # Without this the job lingers until LiveKit empties the room (~20 s).
         ctx.shutdown(reason=reason)
 
     @session.on("close")
     def _on_close(event: Any) -> None:
+        if getattr(event, "error", None) is not None:  # closed by an unrecoverable error
+            vendor_failed(_vendor_of(error=event.error), type(event.error).__name__)
         reason = getattr(event, "reason", "closed")
         tasks["wrap_up"] = asyncio.ensure_future(wrap_up(str(getattr(reason, "value", reason))))
 
@@ -496,7 +642,7 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(lambda: usage.finish(time.monotonic()))
 
     await session.start(agent=agent, room=ctx.room)
-    tasks["limits"] = asyncio.create_task(_enforce_limits(session, monitor, usage), name="voice-limits")
+    tasks["limits"] = asyncio.create_task(_enforce_limits(session, monitor, usage, stalls), name="voice-limits")
     await session.say(SESSION_DISCLAIMER, allow_interruptions=False)
 
 

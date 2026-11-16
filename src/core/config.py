@@ -403,6 +403,16 @@ def get_settings() -> Settings:
     if thinking_raw:
         settings.llm.thinking = LLMConfig.model_validate({"thinking": thinking_raw.strip().lower()}).thinking
 
+    # Any voice.* setting as JSON, for local test runs of the worker (simulated
+    # calls, the turn-detection sweep): '{"endpointing_min_delay": 0.8}'.
+    voice_settings_raw = os.environ.get("FINNIE_VOICE_SETTINGS")
+    if voice_settings_raw:
+        overrides = json.loads(voice_settings_raw)
+        unknown = set(overrides) - set(VoiceConfig.model_fields)
+        if unknown:  # a typo would otherwise be ignored and a sweep would measure nothing
+            raise ValueError(f"FINNIE_VOICE_SETTINGS: unknown voice settings {sorted(unknown)}")
+        settings.voice = VoiceConfig.model_validate({**settings.voice.model_dump(), **overrides})
+
     # Voice access without editing config.yaml: per deployment, or for local dev.
     voice_enabled_raw = os.environ.get("FINNIE_VOICE_ENABLED")
     if voice_enabled_raw is not None:

@@ -659,6 +659,7 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         record = {
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "user_id": user_id,  # an id, as on every worker line; simulated calls match turns by it
             "tts_model": voice.tts_model,
             **agent.turns[-1],
             "end_of_turn_delay_s": pending_user.get("end_of_turn_delay"),

@@ -103,6 +103,13 @@ To check the idle limit (stays silent: "Are you still there?" after 90 s, hang-u
 .venv-voice/bin/python -m spike.voice.scripted_call --idle
 ```
 
+The checked versions of these calls are eval layer 5: `tests/evals/test_simulated_calls.py` starts its own worker (stop yours first, or LiveKit hands it some calls), plays each scenario in `tests/evals/sim_calls.py` and checks the result. `scripts/voice_turn_sweep.py` replays the turn-taking ones per voice setting:
+
+```bash
+FINNIE_EVAL_CALLS=1 FINNIE_EVAL_CALL_SCENARIOS=basic,interruption .venv-voice/bin/python -m pytest tests/evals/test_simulated_calls.py -v -s --no-cov
+.venv-voice/bin/python scripts/voice_turn_sweep.py --grid endpointing_min_delay=0.4,0.5,0.8 --repeat 2
+```
+
 The rate limit, daily minutes and voice-call records live in the user's store, which is per process without `DATABASE_URL`. To see them shared between the caller and the worker, give both the same `DATABASE_URL` (run `python -m src.persistence.migrate` on it first).
 
 To check failure handling, start the worker with one vendor's key broken (the caller keeps the real keys from `.env`), then run the scripted call:

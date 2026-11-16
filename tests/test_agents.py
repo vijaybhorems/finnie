@@ -178,3 +178,63 @@ class TestMarketAnalysisAgent:
         # "I" and "A" should be filtered out
         assert "I" not in tickers
         assert "A" not in tickers
+
+
+class TestUserContext:
+    """The per-request profile text states only what the user told Finnie.
+
+    Regression: an empty profile used to render the model defaults as
+    "investment_horizon=long, risk_tolerance=moderate", and the tax agent told a
+    user it knew nothing about "Since you're young with a long time horizon".
+    """
+
+    @pytest.fixture
+    def agent(self):
+        with patch("src.agents.tax_education_agent.get_retriever"), \
+             patch("src.agents.base_agent.get_llm"):
+            from src.agents.tax_education_agent import TaxEducationAgent
+            return TaxEducationAgent()
+
+    def test_empty_profile_invents_no_attributes(self, agent):
+        context = agent._get_user_context_str(_make_state("How does a Roth IRA compare with a traditional IRA?"))
+
+        assert "not set" in context
+        lowered = context.lower()
+        for invented in ("=", "long", "short", "medium", "moderate", "aggressive", "conservative",
+                         "young", "age", "retire", "income", "bracket", "saved memories"):
+            assert invented not in lowered, f"{invented!r} in empty-profile context: {context}"
+
+    def test_only_chosen_fields_are_stated(self, agent):
+        context = agent._get_user_context_str(_make_state("q", {"knowledge_level": "advanced"}))
+
+        assert "knowledge_level=advanced" in context
+        assert "risk_tolerance=" not in context and "investment_horizon=" not in context
+        assert "Not set: risk_tolerance, investment_horizon" in context
+        assert "beginner" not in context
+
+    def test_full_profile_is_stated(self, agent):
+        profile = {"knowledge_level": "intermediate", "risk_tolerance": "aggressive", "investment_horizon": "short"}
+        context = agent._get_user_context_str(_make_state("q", profile))
+
+        assert "knowledge_level=intermediate, risk_tolerance=aggressive, investment_horizon=short" in context
+        assert "not set" not in context.lower()
+
+    def test_rule_against_assumptions_is_in_the_cached_shared_prompt(self):
+        from src.agents.prompts import shared_system_prompt
+
+        shared = shared_system_prompt()
+        assert "What you know about the user" in shared
+        assert "speak conditionally" in shared
+
+    def test_goal_planning_labels_an_unset_risk_tolerance_as_assumed(self):
+        with patch("src.agents.goal_planning_agent.FredClient") as fred, \
+             patch("src.agents.base_agent.get_llm") as llm:
+            fred.return_value.get_interest_rate_environment.return_value = {}
+            llm.return_value.invoke.return_value = MagicMock(content="ok")
+            from src.agents.goal_planning_agent import GoalPlanningAgent
+            agent = GoalPlanningAgent()
+            agent.run(_make_state("help me plan retirement"))
+
+        messages = llm.return_value.invoke.call_args.args[0]
+        request_block = messages[0].content[-1]["text"]
+        assert "MODERATE INVESTOR (assumed" in request_block

@@ -23,11 +23,14 @@ class AgentType(str, Enum):
 class UserProfile(BaseModel):
     """Persisted user context across turns."""
     user_id: str = "default"
-    risk_tolerance: str = "moderate"  # conservative / moderate / aggressive
-    investment_horizon: str = "long"  # short / medium / long
+    # None means the user hasn't chosen one. Agents must not present a default
+    # as the user's own choice: "investment_horizon=long" for a user who never
+    # set it reads as a fact about them ("since you're young...").
+    risk_tolerance: Optional[str] = None  # conservative / moderate / aggressive
+    investment_horizon: Optional[str] = None  # short / medium / long
     portfolio: list[dict[str, Any]] = Field(default_factory=list)
     goals: list[dict[str, Any]] = Field(default_factory=list)
-    knowledge_level: str = "beginner"  # beginner / intermediate / advanced
+    knowledge_level: Optional[str] = None  # beginner / intermediate / advanced
     # Saved facts relevant to this turn's question (hydrate node; per turn).
     memories: list[dict[str, Any]] = Field(default_factory=list)
 

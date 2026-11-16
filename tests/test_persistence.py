@@ -277,6 +277,18 @@ class TestHydrate:
         assert seen.risk_tolerance == "aggressive"
         assert seen.portfolio == [{"ticker": "NVDA", "shares": 2.0, "avg_cost": 400.0}]
 
+    def test_unsaved_profile_fields_stay_unset(self, agent):
+        """Defaults are not the user's choices: agents must see them as unset,
+        or the model treats "investment_horizon=long" as a fact about the user."""
+        user_id = _new_user()
+        data = _user_data(user_id)
+        _chat(user_id, data.active_thread_id(), "how does a roth ira work?")
+
+        seen = agent.seen[-1].user_profile
+        assert (seen.knowledge_level, seen.risk_tolerance, seen.investment_horizon) == (None, None, None)
+        # The sidebar still shows defaults for a new user.
+        assert data.get_profile()["investment_horizon"] == "long"
+
     def test_one_shot_callers_are_hydrated_too(self, agent):
         """Portfolio/Market/Goals tabs call run_workflow without a thread."""
         from src.workflow.graph import run_workflow

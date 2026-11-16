@@ -1,12 +1,18 @@
-"""Voice spike worker: LiveKit Agents in front of Finnie's existing graph.
+"""Voice worker: LiveKit Agents in front of Finnie's existing graph.
 
 Each spoken turn goes Deepgram -> stream_workflow() -> ElevenLabs. The graph
 runs in-process exactly as for the chat page: same classifier, guardrails,
-agents and caches. Per-turn latency lands in spike/voice/runs/turns.jsonl.
+agents and caches, with channel="voice" for short spoken answers.
 
-Run (see spike/voice/README.md for keys and the local LiveKit server):
-    .venv-voice/bin/python -m spike.voice.worker dev        # joins rooms
-    .venv-voice/bin/python -m spike.voice.worker console    # laptop mic/speaker, no browser
+A call joins only if src/voice/access.py allows it: voice enabled, a g-<sub>
+identity, a room named after that identity, and an allowlisted email. The room
+name is the call's conversation thread. A refused call hears VOICE_UNAVAILABLE,
+ends, and leaves nothing saved.
+
+Needs requirements-voice.txt on top of requirements.txt (spike/voice/README.md):
+    .venv-voice/bin/python -m src.voice.worker dev        # joins rooms
+    .venv-voice/bin/python -m src.voice.worker console    # laptop mic/speaker, no browser
+Set VOICE_TURN_LOG=spike/voice/runs/turns.jsonl to keep per-turn timings with the question text.
 """
 from __future__ import annotations
 
@@ -15,24 +21,16 @@ import json
 import os
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any, AsyncIterable
 
 from dotenv import load_dotenv
 
 load_dotenv()
-# Same defaults as the Talk page: `livekit-server --dev`. LiveKit Cloud values come from .env.
+# Same defaults as `livekit-server --dev`. LiveKit Cloud values come from .env.
 os.environ.setdefault("LIVEKIT_URL", "ws://localhost:7880")
 os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
 os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
-# Voice can't afford the model thinking silently before it speaks (~9 s on goals
-# questions). Applies to this process only: the classifier and every agent.
-# Set FINNIE_LLM_THINKING=adaptive to measure the chat-page behaviour instead.
-os.environ.setdefault("FINNIE_LLM_THINKING", "disabled")
-# Same routing and scope accuracy as Sonnet 5 on the labelled eval cases, ~0.45 s
-# faster per turn (spike/voice/compare_classifier.py).
-os.environ.setdefault("FINNIE_CLASSIFIER_MODEL", "claude-haiku-5-5")
 
 from livekit.agents import (  # noqa: E402
     Agent,
@@ -48,20 +46,41 @@ from livekit.agents.types import FlushSentinel  # noqa: E402
 from livekit.plugins import deepgram, elevenlabs, silero  # noqa: E402
 from livekit.plugins.turn_detector.english import EnglishModel  # noqa: E402
 
-from spike.voice.prefetch import FILLERS, warm_shared_data  # noqa: E402
+from src.core.config import get_settings  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
+from src.voice.access import VOICE_UNAVAILABLE, check_join, new_voice_room  # noqa: E402
+from src.voice.prefetch import FILLERS, warm_shared_data  # noqa: E402
+from src.voice.speech import SESSION_DISCLAIMER, SpeechBuffer, strip_written_disclaimer  # noqa: E402
 
 logger = get_logger("finnie.voice")
-from spike.voice.speech import SESSION_DISCLAIMER, SpeechBuffer, strip_written_disclaimer  # noqa: E402
 
-RUNS = Path(__file__).parent / "runs"
 # Both on by default; set to 0 to measure without them.
 SPECULATE = os.environ.get("VOICE_SPECULATE", "1") == "1"  # classify + warm data while the user speaks
 FILLER = os.environ.get("VOICE_FILLER", "1") == "1"  # say a short line first on slow turns
 WARM_EVERY_S = 60.0  # prices cache for 5 min; re-warm at most once a minute
-TTS_MODEL = os.environ.get("VOICE_TTS_MODEL", "eleven_flash_v2_5")
-# ElevenLabs' default voice unless one is chosen (see "Emotion control" in the design doc).
-VOICE_ID = os.environ.get("VOICE_ELEVEN_VOICE_ID", "")
+TURN_LOG = os.environ.get("VOICE_TURN_LOG", "")  # local measurement only: holds what users said
+
+
+def configure_process() -> None:
+    """Apply the voice settings that differ from chat to this process only.
+
+    Must run before the first get_llm() or get_pool() call, which cache what
+    they read. FINNIE_LLM_THINKING / FINNIE_CLASSIFIER_MODEL still win when set,
+    so the chat-page behaviour can be measured from the worker.
+    """
+    settings = get_settings()
+    voice = settings.voice
+    # Voice can't afford the model thinking silently before it speaks (~9 s on goals questions).
+    if not os.environ.get("FINNIE_LLM_THINKING"):
+        settings.llm.thinking = voice.llm_thinking
+    # Same routing and scope accuracy as Sonnet 5 on the labelled cases, ~0.45 s
+    # faster per turn (spike/voice/compare_classifier.py).
+    if not os.environ.get("FINNIE_CLASSIFIER_MODEL"):
+        settings.llm.classifier_model = voice.classifier_model
+    settings.persistence.pool_max_size = min(settings.persistence.pool_max_size, voice.db_pool_max_size)
+
+
+configure_process()
 
 # Deepgram keyterm prompting for finance words it would otherwise mishear.
 KEYTERMS = [
@@ -96,10 +115,10 @@ class GraphLLM(llm.LLM):
 class FinnieVoiceAgent(Agent):
     """Replaces the LLM step with a call into Finnie's graph (not LLMAdapter: see design doc)."""
 
-    def __init__(self, user_id: str) -> None:
+    def __init__(self, user_id: str, thread_id: str) -> None:
         super().__init__(instructions="Answers come from Finnie's workflow, not this prompt.")
         self.user_id = user_id
-        self.thread_id = f"{user_id}:{uuid.uuid4()}"  # its own thread per session (Open question 1)
+        self.thread_id = thread_id  # the room name: its own thread per call (Open question 1)
         self.turns: list[dict[str, Any]] = []
         # Speculation state for the turn being spoken.
         self._finals: list[str] = []
@@ -271,19 +290,50 @@ def prewarm(proc: JobProcess) -> None:
 server = AgentServer(setup_fnc=prewarm, initialize_process_timeout=120)
 
 
+async def _refuse(ctx: JobContext, reason: str) -> None:
+    """Say VOICE_UNAVAILABLE and end the call. Nothing is saved for a refused call."""
+    logger.warning("voice_join_refused", reason=reason)
+    session = AgentSession(tts=elevenlabs.TTS(model=get_settings().voice.tts_model))
+    try:
+        await session.start(agent=Agent(instructions="Refusing this call."), room=ctx.room)
+        await session.say(VOICE_UNAVAILABLE, allow_interruptions=False, add_to_chat_ctx=False)
+    except Exception as exc:  # noqa: BLE001 — the call still ends, just without the line
+        logger.warning("voice_refusal_line_failed", error=type(exc).__name__)
+    finally:
+        await session.aclose()
+        await ctx.delete_room()
+        ctx.shutdown(reason=f"refused: {reason}")
+
+
 @server.rtc_session()
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     participant = await ctx.wait_for_participant()
-    # Spike only: identity comes from the token the talk page minted. Production
-    # re-checks the g-<sub> form, room prefix and allowlist (design doc).
-    agent = FinnieVoiceAgent(user_id=f"spike-{participant.identity}")
+    if ctx.is_fake_job():
+        # `console` mode: the laptop's own mic and speaker, no room and no token
+        # to check. A local identity keeps its data apart from real users'.
+        user_id = "g-local-console"
+        thread_id = new_voice_room(user_id)
+    else:
+        user_id, thread_id = participant.identity, ctx.room.name
+        denied = check_join(user_id, thread_id, participant.metadata)
+        if denied:
+            await _refuse(ctx, denied)
+            return
 
-    tts_kwargs: dict[str, Any] = {"model": TTS_MODEL}
-    if VOICE_ID:
-        tts_kwargs["voice_id"] = VOICE_ID
+    from src.persistence.user_data import UserData
+
+    # Records the call without touching the chat page's active thread.
+    await asyncio.to_thread(UserData(user_id).start_voice_call, thread_id)
+    agent = FinnieVoiceAgent(user_id=user_id, thread_id=thread_id)
+    logger.info("voice_call_started")
+
+    voice = get_settings().voice
+    tts_kwargs: dict[str, Any] = {"model": voice.tts_model}
+    if voice.tts_voice_id:
+        tts_kwargs["voice_id"] = voice.tts_voice_id
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3", language="en-US", keyterm=KEYTERMS, smart_format=True),
+        stt=deepgram.STT(model=voice.stt_model, language="en-US", keyterm=KEYTERMS, smart_format=True),
         llm=GraphLLM(),
         tts=elevenlabs.TTS(**tts_kwargs),
         vad=ctx.proc.userdata["vad"],
@@ -295,8 +345,6 @@ async def entrypoint(ctx: JobContext) -> None:
         },
     )
 
-    RUNS.mkdir(exist_ok=True)
-    log = RUNS / "turns.jsonl"
     pending_user: dict[str, Any] = {}
 
     @session.on("conversation_item_added")
@@ -312,7 +360,7 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         record = {
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "tts_model": TTS_MODEL,
+            "tts_model": voice.tts_model,
             **agent.turns[-1],
             "end_of_turn_delay_s": pending_user.get("end_of_turn_delay"),
             "transcription_delay_s": pending_user.get("transcription_delay"),
@@ -326,8 +374,13 @@ async def entrypoint(ctx: JobContext) -> None:
         record["time_to_first_audio_s"] = (
             round(sum(parts), 3) if all(p is not None for p in parts) else None
         )
-        with log.open("a") as fh:
-            fh.write(json.dumps(record) + "\n")
+        # Logs never carry what the user said or the answer; the local file may.
+        logger.info("voice_turn", **{k: v for k, v in record.items() if k not in ("question", "filler", "at")})
+        if TURN_LOG:
+            path = Path(TURN_LOG)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a") as fh:
+                fh.write(json.dumps(record) + "\n")
 
     @session.on("user_input_transcribed")
     def _on_transcript(event: Any) -> None:

@@ -14,6 +14,11 @@ Layout in the LangGraph store, namespace ("users", <user_id>):
   session   {active_thread_id}                       (current chat thread)
   settings  {memory_enabled}                         (user's memory switch)
 
+Voice calls are listed in ("users", <user_id>, "voice_calls"), one item per
+call keyed by its thread id. A call's messages live in the checkpointer like a
+chat thread's, but starting one never touches session.active_thread_id, so a
+call does not replace the conversation on the Chat page.
+
 Memories live one level down, in ("users", <user_id>, "memories"), one item
 per fact, semantically indexed on "fact" so the relevant few can be recalled
 per question. Only memory items are indexed; everything above is written with
@@ -171,6 +176,28 @@ class UserData:
         thread_id = f"{self._thread_prefix()}{uuid.uuid4().hex}"
         self._put("session", {"active_thread_id": thread_id})
         return thread_id
+
+    # ── Voice calls ──────────────────────────────────────────────────────────
+
+    @property
+    def _voice_namespace(self) -> tuple[str, str, str]:
+        return ("users", self._user_id, "voice_calls")
+
+    def start_voice_call(self, thread_id: str) -> None:
+        """Record a voice call on `thread_id` (the call's room name), leaving chat alone."""
+        if not self.owns_thread(thread_id):
+            raise ValueError("voice call thread does not belong to this user")
+        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self._store.put(
+            self._voice_namespace, thread_id,
+            {"thread_id": thread_id, "channel": "voice", "started_at": started}, index=False,
+        )
+
+    def voice_calls(self, limit: int = 50) -> list[dict[str, Any]]:
+        """This user's voice calls, newest first."""
+        items = self._store.search(self._voice_namespace, limit=limit)
+        calls = [item.value for item in items if self.owns_thread(item.value.get("thread_id", ""))]
+        return sorted(calls, key=lambda c: c.get("started_at", ""), reverse=True)
 
     # ── Memories ─────────────────────────────────────────────────────────────
 

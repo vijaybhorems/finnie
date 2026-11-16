@@ -53,7 +53,7 @@ def time_classifier(question: str) -> float:
 
 
 def time_turn(question: str, channel: str) -> dict:
-    from spike.voice.speech import SpeechBuffer, strip_written_disclaimer
+    from src.voice.speech import SpeechBuffer, strip_written_disclaimer
     from src.workflow.graph import stream_workflow
 
     sink: dict = {}

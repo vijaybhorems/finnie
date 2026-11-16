@@ -4,62 +4,34 @@ LOCAL USE ONLY. No sign-in: it mints LiveKit tokens for whoever opens it, so
 it must never be deployed (spike/ is excluded from the Docker image). The real
 button sits on the chat page behind Google sign-in (design doc, Page changes).
 
-Run:
-    .venv-voice/bin/streamlit run spike/voice/talk_page.py
+Run (from the repo root, so `spike` and `src` import):
+    PYTHONPATH=. .venv-voice/bin/streamlit run spike/voice/talk_page.py
 """
 from __future__ import annotations
 
 import json
-import os
-import uuid
-from datetime import timedelta
 
 import streamlit as st
 import streamlit.components.v1 as components
-from dotenv import load_dotenv
-from livekit import api
 
-load_dotenv()
+from spike.voice.local_token import LIVEKIT_URL, TEST_EMAIL, new_call
 
-# Defaults match `livekit-server --dev` (see README); LiveKit Cloud values come from .env.
-LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
-LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "devkey")
-LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "secret")
 # Pinned, as the design doc asks of every CDN script.
 LIVEKIT_CLIENT_JS = "https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"
-
-
-def mint_token(identity: str, room: str) -> str:
-    """Join one room, publish microphone audio only (design doc: token rules)."""
-    grants = api.VideoGrants(
-        room_join=True,
-        room=room,
-        can_publish=True,
-        can_subscribe=True,
-        can_publish_data=False,
-        can_publish_sources=["microphone"],
-    )
-    return (
-        api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        .with_identity(identity)
-        .with_grants(grants)
-        .with_ttl(timedelta(minutes=10))
-        .to_jwt()
-    )
 
 
 st.set_page_config(page_title="Finnie voice spike", page_icon="🎙️")
 st.title("Voice spike: Talk")
 st.caption("Local test page. Start the LiveKit dev server and the worker first (spike/voice/README.md).")
 
-identity = st.text_input("Test identity", value="tester")
-if "room" not in st.session_state:
-    st.session_state.room = f"spike-{identity}:{uuid.uuid4()}"
-config = json.dumps({
-    "url": LIVEKIT_URL,
-    "token": mint_token(identity, st.session_state.room),
-    "room": st.session_state.room,
-})
+name = st.text_input("Test user", value="tester")
+email = st.text_input("Email in the token (must be on the worker's allowlist)", value=TEST_EMAIL)
+if st.session_state.get("call_for") != (name, email):
+    st.session_state.call_for = (name, email)
+    st.session_state.call = new_call(name, email)
+identity, room, token = st.session_state.call
+st.caption(f"Identity `{identity}`, room `{room}`")
+config = json.dumps({"url": LIVEKIT_URL, "token": token, "room": room})
 
 components.html(
     f"""

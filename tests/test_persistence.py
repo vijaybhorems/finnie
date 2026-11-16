@@ -344,11 +344,77 @@ class TestCrossUserIsolation:
         # And alice's conversation is untouched.
         assert len(load_conversation(alice, alice_thread)) == 2
 
+    def test_voice_calls_do_not_cross(self, agent):
+        from src.voice.access import check_join, new_voice_room, token_metadata
+        from src.core.config import VoiceConfig
+
+        alice, bob = _new_user(), _new_user()
+        alice_room = new_voice_room(alice)
+        _user_data(alice).start_voice_call(alice_room)
+        _voice_turn(alice, alice_room, "alice spoke")
+
+        bob_data = _user_data(bob)
+        assert bob_data.voice_calls() == []
+        with pytest.raises(ValueError):
+            bob_data.start_voice_call(alice_room)
+        with pytest.raises(ValueError):
+            _voice_turn(bob, alice_room, "let me in")
+        voice = VoiceConfig(enabled=True, allowed_emails=["*"])
+        assert check_join(bob, alice_room, token_metadata("bob@example.com"), voice) == "room_not_owned"
+
+        # Bob's own call sees none of alice's words, and hers is untouched.
+        bob_room = new_voice_room(bob)
+        _voice_turn(bob, bob_room, "bob spoke")
+        assert [m.content for m in agent.seen[-1].messages] == ["bob spoke"]
+        assert [c["thread_id"] for c in _user_data(alice).voice_calls()] == [alice_room]
+
     def test_thread_without_user_is_refused(self, agent):
         from src.workflow.graph import run_workflow
 
         with pytest.raises(ValueError):
             run_workflow("hi", thread_id="g-123:abc")
+
+
+def _voice_turn(user_id: str, thread_id: str, message: str) -> dict[str, Any]:
+    """A turn as the voice worker runs it."""
+    from src.workflow.graph import stream_workflow
+
+    sink: dict[str, Any] = {}
+    list(stream_workflow(message, sink=sink, user_id=user_id, thread_id=thread_id, channel="voice"))
+    return sink
+
+
+class TestVoiceCalls:
+    """A voice call is its own thread: it never replaces or reads the chat thread."""
+
+    def test_call_is_recorded_without_touching_the_chat_thread(self, backend):
+        from src.voice.access import new_voice_room
+
+        user = _new_user()
+        data = _user_data(user)
+        chat_thread = data.active_thread_id()
+        room = new_voice_room(user)
+        data.start_voice_call(room)
+
+        assert data.active_thread_id() == chat_thread
+        assert [c["thread_id"] for c in data.voice_calls()] == [room]
+        assert data.voice_calls()[0]["channel"] == "voice"
+
+    def test_voice_turns_stay_in_the_call_thread(self, agent):
+        from src.voice.access import new_voice_room
+        from src.workflow.graph import load_conversation
+
+        user = _new_user()
+        chat_thread = _user_data(user).active_thread_id()
+        _chat(user, chat_thread, "typed question")
+        room = new_voice_room(user)
+        _user_data(user).start_voice_call(room)
+        _voice_turn(user, room, "spoken one")
+        _voice_turn(user, room, "spoken two")
+
+        assert agent.seen[-1].channel == "voice"
+        assert [m.content for m in agent.seen[-1].messages if m.type == "human"] == ["spoken one", "spoken two"]
+        assert [m.content for m in load_conversation(user, chat_thread) if m.type == "human"] == ["typed question"]
 
 
 # ── History window sent to the model ───────────────────────────────────────

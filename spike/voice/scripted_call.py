@@ -6,32 +6,31 @@ The caller measures what a user hears: end of their question -> first audible
 frame of Finnie's reply. The second question interrupts the first answer, to
 exercise the interruption path. Finnie's audio is saved to runs/ as WAV.
 
-Needs the LiveKit dev server and `python -m spike.voice.worker dev` running.
+Needs the LiveKit dev server and the worker running (see spike/voice/local_token.py).
     .venv-voice/bin/python -m spike.voice.scripted_call
+    .venv-voice/bin/python -m spike.voice.scripted_call --email someone@else.test   # expect a refusal
 Costs: a few ElevenLabs and Deepgram seconds, one Finnie turn per question.
 """
 from __future__ import annotations
 
+import argparse
 import array
 import asyncio
 import json
 import math
 import os
 import time
-import uuid
 import wave
-from datetime import timedelta
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from livekit import api, rtc
+from livekit import rtc
+
+from spike.voice.local_token import LIVEKIT_URL as URL, TEST_EMAIL, new_call
 
 load_dotenv()
 
-URL = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
-KEY = os.environ.get("LIVEKIT_API_KEY", "devkey")
-SECRET = os.environ.get("LIVEKIT_API_SECRET", "secret")
 RATE = 16000
 FRAME = RATE // 100  # 10 ms
 RUNS = Path(__file__).parent / "runs"
@@ -42,7 +41,7 @@ SCRIPT = [
     ("What is a P/E ratio?", 12),  # cut off: the next question interrupts it
     ("How is Apple stock doing today?", 12),  # interrupted too
     ("How much do I need to save to retire at 55?", 12),  # goals: where thinking cost ~9 s
-    ("What is a P/E ratio?", None),  # repeat: should be an FAQ cache hit
+    ("What is a P/E ratio?", None),  # repeat: voice skips the FAQ cache, so a full turn
 ]
 ANSWER_CAP_S = 40  # stop listening to one answer after this long
 QUIET_S = 0.3  # an interrupted answer must fall silent this long before a new reply counts
@@ -66,8 +65,12 @@ def rms(frame: rtc.AudioFrame) -> float:
 
 
 class Call:
-    def __init__(self) -> None:
+    def __init__(self, email: str = TEST_EMAIL) -> None:
+        self.email = email
+        self.identity = ""
         self.room = rtc.Room()
+        self.disconnected = asyncio.Event()
+        self.room.on("disconnected", lambda *_: self.disconnected.set())
         self.state = "?"
         self.state_changed = asyncio.Event()
         self.listen_from: float | None = None  # end of our question
@@ -78,14 +81,7 @@ class Call:
         self.transcript: list[tuple[str, str]] = []
 
     async def connect(self) -> None:
-        room_name = f"spike-scripted:{uuid.uuid4()}"
-        token = (
-            api.AccessToken(KEY, SECRET)
-            .with_identity("scripted")
-            .with_grants(api.VideoGrants(room_join=True, room=room_name))
-            .with_ttl(timedelta(minutes=10))
-            .to_jwt()
-        )
+        self.identity, _room, token = new_call("scripted", self.email)
 
         @self.room.on("participant_attributes_changed")
         def _attrs(changed: dict, participant: rtc.Participant) -> None:
@@ -105,7 +101,7 @@ class Call:
                 except rtc.data_stream.StreamError:  # we hung up mid-sentence
                     return
                 if text:
-                    self.transcript.append(("You" if identity == "scripted" else "Finnie", text))
+                    self.transcript.append(("You" if identity == self.identity else "Finnie", text))
             asyncio.ensure_future(read())
 
         self.room.register_text_stream_handler("lk.transcription", _text)
@@ -176,10 +172,31 @@ class Call:
         await self.spoken.wait()
 
 
+async def refused(email: str) -> None:
+    """Join with an email the worker should refuse: expect one line, then the call ends."""
+    call = Call(email)
+    await call.connect()
+    try:
+        await asyncio.wait_for(call.disconnected.wait(), 150)  # first job prewarms
+        print("call ended by the worker")
+    except asyncio.TimeoutError:
+        print("FAIL: the call was not ended")
+        await call.room.disconnect()
+    for who, text in call.transcript:
+        print(f"  {who}: {text}")
+
+
 async def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--email", default=TEST_EMAIL, help="email in the token; any other than "
+                        "VOICE_TEST_EMAIL checks the refusal path instead of asking questions")
+    email = parser.parse_args().email
+    if email != TEST_EMAIL:
+        await refused(email)
+        return
     RUNS.mkdir(exist_ok=True)
     audio = [(q, synthesize(q)) for q, _ in SCRIPT]
-    call = Call()
+    call = Call(email)
     await call.connect()
     call.start_mic()
     print("connected; waiting for Finnie's opening line")

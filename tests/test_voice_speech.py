@@ -1,7 +1,7 @@
 """Speech shaping for the voice spike (design doc, Evaluation layer 1)."""
 from __future__ import annotations
 
-from spike.voice.speech import SpeechBuffer, for_speech, strip_written_disclaimer
+from src.voice.speech import SpeechBuffer, for_speech, strip_written_disclaimer
 from src.agents.base_agent import _DISCLAIMER
 
 

@@ -7,18 +7,20 @@ It puts LiveKit Agents in front of Finnie's existing graph:
 browser mic ─► LiveKit room ─► worker: Deepgram STT ─► stream_workflow() ─► SpeechBuffer ─► ElevenLabs TTS ─► room ─► speaker
 ```
 
-Nothing here ships. `spike/` is excluded from the Docker image, and the Talk page has no sign-in.
+The worker, speech shaping and prefetch moved to `src/voice/` in the Safeguards release (voice foundations). What stays here is local test tooling: `spike/` is excluded from the Docker image, and the Talk page has no sign-in.
 
 | File | What it does |
 |---|---|
-| `worker.py` | LiveKit agent. `llm_node` calls `stream_workflow()` with its own thread per session. Logs each turn to `runs/turns.jsonl`. |
-| `speech.py` | Removes the written disclaimer and markdown, and releases whole sentences to TTS. Tested in `tests/test_voice_speech.py`. |
+| `src/voice/worker.py` | LiveKit agent. Checks each call (`src/voice/access.py`), then `llm_node` calls `stream_workflow()` on the call's own thread (the room name). |
+| `src/voice/access.py` | The join checks: voice enabled, a `g-<sub>` identity, a room named `<identity>:<32 hex>`, an allowlisted email in the token metadata. Tested in `tests/test_voice_access.py`. |
+| `src/voice/speech.py` | Removes the written disclaimer and markdown, and releases whole sentences to TTS. Tested in `tests/test_voice_speech.py`. |
+| `local_token.py` | Tokens for the local tools that pass the join checks as `g-local-<name>` with `VOICE_TEST_EMAIL` (default `tester@example.com`). |
 | `talk_page.py` | Local Streamlit page with Talk and End buttons and a live transcript. Mints mic-only, 10-minute tokens. |
 | `measure_turns.py` | Times Finnie's share of latency (classifier, first sentence, total) with no voice vendors involved. |
 | `compare_classifier.py` | Runs the production classifier over the eval suite's 44 labelled cases per model and thinking setting: routing and scope accuracy, p50/p95 latency. |
-| `prefetch.py` | The live data warmed while the user speaks, and the filler lines said on slow turns. |
+| `src/voice/prefetch.py` | The live data warmed while the user speaks, and the filler lines said on slow turns. |
 | `scripted_call.py` | A caller with no microphone: speaks synthesized questions into a room, interrupts on purpose, records Finnie's audio and times what a user would hear. |
-| `requirements-voice.txt` | LiveKit packages, installed into a separate `.venv-voice`. |
+| `requirements-voice.txt` (repo root) | LiveKit packages, installed into a separate `.venv-voice`. |
 
 ## Setup
 
@@ -29,11 +31,11 @@ uv venv .venv-voice --python 3.12
 ```
 
 ```bash
-uv pip install --python .venv-voice -r requirements.txt -r spike/voice/requirements-voice.txt
+uv pip install --python .venv-voice -r requirements.txt -r requirements-voice.txt
 ```
 
 ```bash
-.venv-voice/bin/python -m spike.voice.worker download-files
+.venv-voice/bin/python -m src.voice.worker download-files
 ```
 
 Add these to `.env`. Finnie's settings ignore unknown keys.
@@ -42,8 +44,8 @@ Add these to `.env`. Finnie's settings ignore unknown keys.
 |---|---|
 | `DEEPGRAM_API_KEY` | Speech to text (nova-3) |
 | `ELEVEN_API_KEY` | Text to speech |
-| `VOICE_TTS_MODEL` | Optional. Default `eleven_flash_v2_5`; try `eleven_v3_conversational` for tone |
-| `VOICE_ELEVEN_VOICE_ID` | Optional. ElevenLabs default voice if unset |
+| `VOICE_TTS_MODEL` | Optional. Overrides `voice.tts_model` (default `eleven_flash_v2_5`) |
+| `VOICE_ELEVEN_VOICE_ID` | Optional. Overrides `voice.tts_voice_id`; ElevenLabs default voice if unset |
 | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Only for LiveKit Cloud. The local dev server below needs none. |
 
 ## Run
@@ -54,28 +56,34 @@ Add these to `.env`. Finnie's settings ignore unknown keys.
 docker run -d --name finnie-livekit -p 7880:7880 -p 7881:7881 -p 7882:7882/udp livekit/livekit-server:v1.13.10 --dev --bind 0.0.0.0 --node-ip 127.0.0.1
 ```
 
-2. Start the worker. The first job waits about 20 s for prewarm.
+2. Start the worker with voice on and the test email allowed (`voice:` in `config.yaml` is off by default). The first job waits about 20 s for prewarm. `VOICE_TURN_LOG` keeps per-turn timings, with what was said, in a local file; the worker's own logs never carry the question or answer (LiveKit's `dev` mode logs transcripts at DEBUG, so production runs `start`).
 
 ```bash
-.venv-voice/bin/python -m spike.voice.worker dev
+FINNIE_VOICE_ENABLED=1 FINNIE_VOICE_ALLOWED_EMAILS=tester@example.com VOICE_TURN_LOG=spike/voice/runs/turns.jsonl .venv-voice/bin/python -m src.voice.worker dev
 ```
 
 3. Open the Talk page in a real browser (Chrome or Safari, not an embedded pane, which blocks the mic):
 
 ```bash
-.venv-voice/bin/streamlit run spike/voice/talk_page.py --server.port 8520
+PYTHONPATH=. .venv-voice/bin/streamlit run spike/voice/talk_page.py --server.port 8520
 ```
 
-To test without a browser, use the laptop mic and speaker directly:
+To test without a browser, use the laptop mic and speaker directly (no room or token, so no join checks; it runs as `g-local-console`):
 
 ```bash
-.venv-voice/bin/python -m spike.voice.worker console
+.venv-voice/bin/python -m src.voice.worker console
 ```
 
 To run a whole call with no microphone (three questions, two interruptions; Finnie's audio lands in `runs/`):
 
 ```bash
 .venv-voice/bin/python -m spike.voice.scripted_call
+```
+
+To check the refusal path (one "Voice isn't available right now" line, then the call ends, nothing saved):
+
+```bash
+.venv-voice/bin/python -m spike.voice.scripted_call --email someone@else.test
 ```
 
 To measure Finnie alone (main venv, real Anthropic key, a few cents):
@@ -91,11 +99,13 @@ To measure Finnie alone (main venv, real Anthropic key, a few cents):
 - [x] Finnie's latency measured without voice vendors (below)
 - [x] Speech → answer → audio end to end through the room (scripted caller, below)
 - [x] Interrupting Finnie mid-answer stops it and answers the new question
-- [ ] The same with a real microphone in Chrome and Safari
-- [ ] Echo: on laptop speakers, Finnie doesn't hear and answer itself
-- [ ] iOS Safari: the mic works over HTTPS (tunnel) and the call survives locking the screen
+- [x] The same with a real microphone in Chrome and Safari (checked by hand, 2026-11-10)
+- [x] Echo: on laptop speakers, Finnie doesn't hear and answer itself (checked by hand, 2026-11-10)
+- [x] iOS Safari: the mic works over HTTPS (tunnel) and the call survives locking the screen (checked by hand, 2026-11-10)
 - [x] Time to first audio measured (below). It misses the targets.
-- [ ] Cost per minute: Deepgram plus ElevenLabs usage from their dashboards after a measured session
+- [x] Cost per minute: Deepgram plus ElevenLabs usage from their dashboards after a measured session (measured by hand, 2026-11-10)
+- [x] Time to first audio for both ElevenLabs models, Flash v2.5 and v3 Conversational (below)
+- [ ] Latency targets agreed: revised targets proposed in the design doc (Open question 6)
 
 ## Findings so far (2026-11-10)
 
@@ -255,6 +265,20 @@ The answer itself, after the filler, now starts 0.55–1.0 s after the verdict o
 - Routing unchanged: 32/32 routing and 12/12 scope on both Haiku 5.5 and Sonnet 5 (thinking off). Haiku p50 1.07 s (was 1.03 s).
 - The names above, plus "Tesla" and "Microsoft", all resolved correctly. "How is the tech sector doing?" gives XLK.
 - Heard by the caller: Apple 2.96 s, now with a real quote ("trading around three hundred forty eight dollars, down about six tenths of one percent"). That's a little slower than 2.5–2.9 s because the turn now fetches AAPL's price and RSI, which warming can't know in advance. The answer started 1.19 s after the verdict, still under the filler.
+
+### Eleven v3 Conversational vs Flash v2.5 (2026-11-10)
+
+The design doc's spike gate asks for time to first audio on both ElevenLabs models. Every run above used Flash v2.5. Two scripted calls with `VOICE_TTS_MODEL=eleven_v3_conversational` (same pipeline: Haiku classifier, thinking off, short answers, filler, warm data):
+
+| | Flash v2.5 | v3 Conversational |
+|---|---|---|
+| TTS first byte, median (min–max) | 0.19 s (0.16–0.40), 60 turns | 0.34 s (0.30–0.38), 8 turns |
+| P/E (no filler), heard | 3.5–4.3 s | 4.4–4.5 s |
+| Apple (filler), heard | 3.0–3.1 s | 3.0–3.6 s |
+| Retire at 55 (filler), heard | 3.1 s | 3.2–3.3 s |
+| P/E again, heard | 3.1–3.4 s | 3.2–3.3 s |
+
+v3 adds about 0.15 s to every turn. That's small next to the ~2 s of voice plumbing, but it's paid on every turn. v3 also streamed fine over the websocket. **Flash v2.5 stays the default.** Switch only if v3 sounds clearly better: compare `runs/scripted-20261110-233047.wav` (v3) with `runs/scripted-20261110-222904.wav` (Flash) by ear. Check the per-character price for each model on the ElevenLabs dashboard too.
 
 ### Levers to try next, in order
 

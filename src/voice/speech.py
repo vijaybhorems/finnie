@@ -1,6 +1,6 @@
 """Turn Finnie's written answer into something fit to speak.
 
-Spike quality: enough to stop markdown being read aloud and to keep the full
+Enough to stop markdown being read aloud and to keep the full
 written disclaimer off the audio (the session-start line covers it). The saved
 answer is never changed; only what goes to text-to-speech.
 """

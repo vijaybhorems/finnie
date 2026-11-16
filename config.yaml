@@ -127,6 +127,17 @@ memory:
   dedup_similarity: 0.85      # a near-identical new fact replaces the old one
   max_memories_per_user: 100
 
+voice:
+  # Voice calls (src/voice/, LiveKit worker). Off until the safeguards ship.
+  # Env overrides: FINNIE_VOICE_ENABLED, FINNIE_VOICE_ALLOWED_EMAILS (comma-separated).
+  enabled: false
+  allowed_emails: []          # empty lets nobody call; ["*"] lets every signed-in user
+  stt_model: "nova-3"
+  tts_model: "eleven_flash_v2_5"
+  classifier_model: "claude-haiku-5-5"   # the worker's process only
+  llm_thinking: "disabled"               # the worker's process only
+  db_pool_max_size: 2         # per worker process
+
 planning:
   default_inflation: 0.03  # used for real (inflation-adjusted) projection view
   max_horizon_years: 60

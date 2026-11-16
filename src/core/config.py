@@ -187,6 +187,27 @@ class MemoryConfig(BaseModel):
     max_memories_per_user: int = 100
 
 
+class VoiceConfig(BaseModel):
+    """Voice calls (src/voice/): who may call, and what the worker runs.
+
+    Off by default. The worker re-checks `enabled` and the allowlist when each
+    call joins, so a token minted before access was withdrawn does not work.
+    """
+    enabled: bool = False
+    # Lower-cased Google account emails allowed to call. Empty lets nobody in
+    # (unlike the app's ALLOWED_EMAILS); a single "*" lets every signed-in user in.
+    allowed_emails: list[str] = []
+    stt_model: str = "nova-3"
+    tts_model: str = "eleven_flash_v2_5"
+    tts_voice_id: str = ""  # empty: the ElevenLabs plugin's default voice
+    # Latency settings the worker applies to its own process only (see llm.*).
+    classifier_model: str = "claude-haiku-5-5"
+    llm_thinking: Literal["adaptive", "disabled"] = "disabled"
+    # The worker holds few concurrent turns per process; chat's pool size would
+    # multiply Cloud SQL connections by the number of worker processes.
+    db_pool_max_size: int = 2
+
+
 class AppConfig(BaseModel):
     name: str = "Finnie - AI Finance Assistant"
     version: str = "1.0.0"
@@ -228,6 +249,7 @@ class Settings(BaseSettings):
     tracing: TracingConfig = TracingConfig()
     planning: PlanningConfig = PlanningConfig()
     memory: MemoryConfig = MemoryConfig()
+    voice: VoiceConfig = VoiceConfig()
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -283,6 +305,8 @@ def get_settings() -> Settings:
         overrides["planning"] = PlanningConfig(**yaml_data["planning"])
     if "memory" in yaml_data:
         overrides["memory"] = MemoryConfig(**yaml_data["memory"])
+    if "voice" in yaml_data:
+        overrides["voice"] = VoiceConfig(**yaml_data["voice"])
     if "app" in yaml_data:
         overrides["app"] = AppConfig(**yaml_data["app"])
 
@@ -312,5 +336,17 @@ def get_settings() -> Settings:
     thinking_raw = os.environ.get("FINNIE_LLM_THINKING")
     if thinking_raw:
         settings.llm.thinking = LLMConfig.model_validate({"thinking": thinking_raw.strip().lower()}).thinking
+
+    # Voice access without editing config.yaml: per deployment, or for local dev.
+    voice_enabled_raw = os.environ.get("FINNIE_VOICE_ENABLED")
+    if voice_enabled_raw is not None:
+        settings.voice.enabled = voice_enabled_raw.strip().lower() in ("1", "true", "yes")
+    voice_emails_raw = os.environ.get("FINNIE_VOICE_ALLOWED_EMAILS")
+    if voice_emails_raw is not None:
+        settings.voice.allowed_emails = [e for e in voice_emails_raw.split(",") if e.strip()]
+    settings.voice.allowed_emails = [e.strip().lower() for e in settings.voice.allowed_emails if e.strip()]
+    for env_name, field in (("VOICE_TTS_MODEL", "tts_model"), ("VOICE_ELEVEN_VOICE_ID", "tts_voice_id")):
+        if os.environ.get(env_name):
+            setattr(settings.voice, field, os.environ[env_name].strip())
 
     return settings

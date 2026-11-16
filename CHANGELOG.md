@@ -12,6 +12,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 ## Unreleased
 
 ### Added
+- Voice calls can be deployed to Google Cloud as a Cloud Run worker pool, set up by the deploy wizard. ([#46](https://github.com/vijaybhorems/finnie/pull/46))
 - CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
 
 ### Fixed

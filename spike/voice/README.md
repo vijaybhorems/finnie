@@ -84,6 +84,12 @@ To run a whole call with no microphone (three questions, two interruptions; Finn
 .venv-voice/bin/python -m spike.voice.scripted_call
 ```
 
+To check memory and discreet amounts (states a fact, then asks about $10,000; the worker should log `memory_saved`, and with `VOICE_TURN_LOG` set the second turn's `spoken` text says "the amount on your screen" instead of the figure):
+
+```bash
+.venv-voice/bin/python -m spike.voice.scripted_call --memory
+```
+
 To check the idle limit (stays silent: "Are you still there?" after 90 s, hang-up at 120 s):
 
 ```bash

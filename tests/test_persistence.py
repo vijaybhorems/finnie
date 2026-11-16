@@ -440,6 +440,49 @@ class TestVoiceCalls:
         assert data.voice_tokens_last_hour(t0 + timedelta(minutes=59)) == 3
         assert data.voice_tokens_last_hour(t0 + timedelta(minutes=61)) == 2
 
+    def test_speak_amounts_is_off_by_default_with_a_saved_default_and_a_call_switch(self, backend):
+        from src.voice.access import new_voice_room
+
+        user = _new_user()
+        data = _user_data(user)
+        room = new_voice_room(user)
+        data.start_voice_call(room)
+        assert data.speak_amounts() is False and data.speak_amounts(room) is False
+
+        data.set_speak_amounts(True)  # "Speak amounts by default"
+        assert data.speak_amounts() is True and data.speak_amounts(room) is True
+
+        data.set_speak_amounts(False, room)  # this call only
+        assert data.speak_amounts(room) is False and data.speak_amounts() is True
+        assert data.voice_calls()[0]["thread_id"] == room  # the call record is kept
+
+    def test_speak_amounts_switch_is_per_user(self, backend):
+        from src.voice.access import new_voice_room
+
+        alice, bob = _new_user(), _new_user()
+        alice_room = new_voice_room(alice)
+        _user_data(alice).start_voice_call(alice_room)
+        _user_data(alice).set_speak_amounts(True)
+        _user_data(alice).set_speak_amounts(True, alice_room)
+
+        bob_data = _user_data(bob)
+        assert bob_data.speak_amounts() is False
+        assert bob_data.speak_amounts(alice_room) is False  # her call's switch isn't his to read
+        with pytest.raises(ValueError):
+            bob_data.set_speak_amounts(False, alice_room)
+        assert _user_data(alice).speak_amounts(alice_room) is True
+
+    def test_voice_turn_carries_speak_amounts(self, agent):
+        from src.voice.access import new_voice_room
+        from src.workflow.graph import stream_workflow
+
+        user = _new_user()
+        room = new_voice_room(user)
+        list(stream_workflow("how am I doing", sink={}, user_id=user, thread_id=room, channel="voice",
+                             speak_amounts=True))
+        list(stream_workflow("and now", sink={}, user_id=user, thread_id=room, channel="voice"))
+        assert [s.speak_amounts for s in agent.seen[-2:]] == [True, False]
+
     def test_voice_seconds_reset_each_utc_day(self, backend):
         from datetime import datetime, timedelta, timezone
 

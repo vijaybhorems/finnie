@@ -235,6 +235,13 @@ class VoiceConfig(BaseModel):
     # main one fails, and alone while the ElevenLabs breaker is open.
     tts_fallback_model: str = "aura-2-asteria-en"
     tts_connect_timeout_seconds: float = 2.0
+    # Memory from voice turns (src/voice/memory.py). A misheard sentence can
+    # become a wrong fact, so voice is stricter than chat: turns Deepgram was
+    # unsure of are skipped, and facts need more confidence than
+    # memory.min_confidence. Saves still running when a call ends get this long.
+    memory_min_transcript_confidence: float = 0.85
+    memory_min_confidence: float = 0.9
+    memory_wait_seconds: float = 10.0
 
 
 class AppConfig(BaseModel):

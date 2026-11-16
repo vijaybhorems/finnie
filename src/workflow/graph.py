@@ -227,6 +227,7 @@ def _initial_state(
     user_profile: dict | None,
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
+    speak_amounts: bool = False,
 ) -> FinnieState:
     from src.core.state import FinancialData
 
@@ -240,6 +241,7 @@ def _initial_state(
         financial_data=FinancialData(),
         channel=channel,
         interrupted_after=interrupted_after,
+        speak_amounts=speak_amounts,
     )
 
 
@@ -262,6 +264,7 @@ def _prepare_turn(
     thread_id: Optional[str],
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
+    speak_amounts: bool = False,
 ) -> tuple[Any, Any, dict[str, Any], list]:
     """Pick the graph variant and build (graph, input, config, fallback_messages)."""
     configurable: dict[str, Any] = {}
@@ -280,11 +283,14 @@ def _prepare_turn(
             "user_profile": profile,
             "channel": channel,
             "interrupted_after": interrupted_after,
+            "speak_amounts": speak_amounts,
             "messages": [HumanMessage(content=user_message)],
         }
         return build_graph(persistent=True), turn, {"configurable": configurable}, turn["messages"]
 
-    state = _initial_state(user_message, conversation_history, user_profile, channel, interrupted_after)
+    state = _initial_state(
+        user_message, conversation_history, user_profile, channel, interrupted_after, speak_amounts,
+    )
     return build_graph(), state, {"configurable": configurable}, state.messages
 
 
@@ -328,6 +334,7 @@ def run_workflow(
     thread_id: Optional[str] = None,
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
+    speak_amounts: bool = False,
 ) -> dict[str, Any]:
     """
     Main entry point for running a single turn through the workflow.
@@ -340,13 +347,16 @@ def run_workflow(
                Omit for a one-shot turn.
     channel    "chat" (default) or "voice": a spoken answer, kept short and
                kept out of the shared FAQ cache.
+    interrupted_after, speak_amounts
+               voice only: what the user heard of the previous answer before
+               cutting in, and whether dollar amounts may be spoken.
 
     Returns a dict with keys: final_response, agent_used, router_reasoning,
     financial_data, rag_context, cache_hit, messages.
     """
     graph, turn, config, fallback = _prepare_turn(
         user_message, conversation_history, user_profile, user_id, thread_id, channel,
-        interrupted_after,
+        interrupted_after, speak_amounts,
     )
     try:
         result = graph.invoke(turn, config)
@@ -365,6 +375,7 @@ def stream_workflow(
     thread_id: Optional[str] = None,
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
+    speak_amounts: bool = False,
 ) -> Iterator[str]:
     """Yield the answer as it is generated; fill `sink` with the full result.
 
@@ -376,7 +387,7 @@ def stream_workflow(
     """
     graph, turn, config, fallback = _prepare_turn(
         user_message, conversation_history, user_profile, user_id, thread_id, channel,
-        interrupted_after,
+        interrupted_after, speak_amounts,
     )
     streamed: list[str] = []
     final_state: dict[str, Any] = {}

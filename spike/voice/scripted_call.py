@@ -9,6 +9,7 @@ exercise the interruption path. Finnie's audio is saved to runs/ as WAV.
 Needs the LiveKit dev server and the worker running (see spike/voice/local_token.py).
     .venv-voice/bin/python -m spike.voice.scripted_call
     .venv-voice/bin/python -m spike.voice.scripted_call --email someone@else.test   # expect a refusal
+    .venv-voice/bin/python -m spike.voice.scripted_call --memory   # a fact to remember, then amounts
 Costs: a few ElevenLabs and Deepgram seconds, one Finnie turn per question.
 """
 from __future__ import annotations
@@ -42,6 +43,11 @@ SCRIPT = [
     ("How is Apple stock doing today?", 12),  # interrupted too
     ("How much do I need to save to retire at 55?", 12),  # goals: where thinking cost ~9 s
     ("What is a P/E ratio?", None),  # repeat: voice skips the FAQ cache, so a full turn
+]
+# --memory: a fact to remember, then amounts, which voice keeps discreet by default.
+MEMORY_SCRIPT = [
+    ("I'm thirty four and I'm saving for a house deposit. I want to buy in 2028.", None),
+    ("If I invest ten thousand dollars at seven percent for ten years, how much will I have?", None),
 ]
 ANSWER_CAP_S = 40  # stop listening to one answer after this long
 QUIET_S = 0.3  # an interrupted answer must fall silent this long before a new reply counts
@@ -209,7 +215,9 @@ async def main() -> None:
     parser.add_argument("--email", default=TEST_EMAIL, help="email in the token; any other than "
                         "VOICE_TEST_EMAIL checks the refusal path instead of asking questions")
     parser.add_argument("--idle", action="store_true", help="stay silent; expect the idle prompt and hang-up")
+    parser.add_argument("--memory", action="store_true", help="state a fact, then ask about amounts")
     args = parser.parse_args()
+    script = MEMORY_SCRIPT if args.memory else SCRIPT
     email = args.email
     if args.idle:
         await idle()
@@ -218,7 +226,7 @@ async def main() -> None:
         await refused(email)
         return
     RUNS.mkdir(exist_ok=True)
-    audio = [(q, synthesize(q)) for q, _ in SCRIPT]
+    audio = [(q, synthesize(q)) for q, _ in script]
     call = Call(email)
     await call.connect()
     call.start_mic()
@@ -227,7 +235,7 @@ async def main() -> None:
     await call.wait_state({"listening"}, 60)
 
     results = []
-    for (question, listen_s), (_, pcm) in zip(SCRIPT, audio):
+    for (question, listen_s), (_, pcm) in zip(script, audio):
         print(f"\nasking: {question}")
         await call.say(pcm)
         start = call.listen_from

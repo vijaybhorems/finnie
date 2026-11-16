@@ -68,6 +68,9 @@ _FIRST_PERSON = re.compile(
 _SENSITIVE = [
     re.compile(r"\S+@\S+\.\S+"),                              # email address
     re.compile(r"(?:\d[\s-]?){9,}"),                          # SSN, card, account, phone
+    # The same spoken as words, as a voice transcript can carry it ("four five
+    # one two ..."): seven or more digit words in a row.
+    re.compile(r"(?:\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b[\s,-]*){7,}", re.IGNORECASE),
     re.compile(r"\b(password|passcode|pin code|security answer)\b", re.IGNORECASE),
 ]
 

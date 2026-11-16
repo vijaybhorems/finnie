@@ -157,6 +157,10 @@ voice:
   slow_turn_abandon_seconds: 20
   tts_fallback_model: "aura-2-asteria-en"  # Deepgram Aura: a second vendor for speech
   tts_connect_timeout_seconds: 2.0
+  # Memory from voice turns: stricter than chat, since a misheard sentence can become a wrong fact
+  memory_min_transcript_confidence: 0.85  # skip turns Deepgram was unsure of
+  memory_min_confidence: 0.9              # chat uses memory.min_confidence (0.8)
+  memory_wait_seconds: 10                 # saves still running when a call ends get this long
 
 planning:
   default_inflation: 0.03  # used for real (inflation-adjusted) projection view

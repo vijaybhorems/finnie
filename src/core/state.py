@@ -76,6 +76,9 @@ class FinnieState(BaseModel):
     # The saved answer is the full text, so the agent is told where the user
     # stopped listening. Set per turn (reset by turn_state_reset like the rest).
     interrupted_after: Optional[str] = None
+    # Voice only: whether dollar amounts may be spoken (UserData.speak_amounts).
+    # Off means discreet: percentages and allocation, the figures left on screen.
+    speak_amounts: bool = False
 
     # User context
     user_profile: UserProfile = Field(default_factory=UserProfile)

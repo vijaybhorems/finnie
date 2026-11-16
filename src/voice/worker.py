@@ -57,6 +57,8 @@ from src.voice.limits import DAILY_LIMIT, ENDS_CALL, LINES, TURN_LIMIT, CallMoni
 from src.voice.health import DEEPGRAM, ELEVENLABS, VendorHealth  # noqa: E402
 from src.voice.prefetch import warm_shared_data  # noqa: E402
 from src.voice.speech import SESSION_DISCLAIMER  # noqa: E402
+from src.voice.runtime import configure_process  # noqa: E402
+from src.voice.stt import clean_transcript, deepgram_options  # noqa: E402
 from src.voice.turns import (  # noqa: E402
     END,
     HEARING_GIVE_UP,
@@ -79,34 +81,7 @@ USAGE_FLUSH_S = 30.0  # save voice seconds this often, so a crashed call still c
 TURN_LOG = os.environ.get("VOICE_TURN_LOG", "")  # local measurement only: holds what was said
 
 
-def configure_process() -> None:
-    """Apply the voice settings that differ from chat to this process only.
-
-    Must run before the first get_llm() or get_pool() call, which cache what
-    they read. FINNIE_LLM_THINKING / FINNIE_CLASSIFIER_MODEL still win when set,
-    so the chat-page behaviour can be measured from the worker.
-    """
-    settings = get_settings()
-    voice = settings.voice
-    # Voice can't afford the model thinking silently before it speaks (~9 s on goals questions).
-    if not os.environ.get("FINNIE_LLM_THINKING"):
-        settings.llm.thinking = voice.llm_thinking
-    # Same routing and scope accuracy as Sonnet 5 on the labelled cases, ~0.45 s
-    # faster per turn (spike/voice/compare_classifier.py).
-    if not os.environ.get("FINNIE_CLASSIFIER_MODEL"):
-        settings.llm.classifier_model = voice.classifier_model
-    settings.persistence.pool_max_size = min(settings.persistence.pool_max_size, voice.db_pool_max_size)
-
-
 configure_process()
-
-# Deepgram keyterm prompting for finance words it would otherwise mishear.
-KEYTERMS = [
-    "Roth", "Roth IRA", "IRA", "401(k)", "403(b)", "HSA", "ETF", "RSI", "MACD",
-    "P/E ratio", "S&P 500", "Nasdaq", "Dow Jones", "dividend", "capital gains",
-    "tax-loss harvesting", "wash sale", "FIRE", "Finnie",
-]
-
 
 
 class GraphLLM(llm.LLM):
@@ -168,6 +143,7 @@ class FinnieVoiceAgent(Agent):
         """Classify the transcript so far; the turn reuses it if the words match."""
         if not SPECULATE:
             return
+        text = clean_transcript(text)  # as llm_node will see it, so the verdict is reused
         if is_final:
             self._finals.append(text.strip())
             self._interim = ""
@@ -228,6 +204,7 @@ class FinnieVoiceAgent(Agent):
         model_settings: ModelSettings,
     ) -> AsyncIterable[str | FlushSentinel]:
         question, confidence = _last_user_turn(chat_ctx)
+        question = clean_transcript(question)
         self._finals, self._interim = [], ""  # the next turn's transcript starts fresh
         if not question:
             return
@@ -543,10 +520,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     stalls = StallWatch(voice.stt_stall_seconds, voice.stt_stalls_to_end)
     session = AgentSession(
-        stt=deepgram.STT(
-            model=voice.stt_model, language="en-US", keyterm=KEYTERMS, smart_format=True,
-            mip_opt_out=True,  # Deepgram's model-improvement opt-out (design doc, Impact item 8)
-        ),
+        stt=deepgram.STT(**deepgram_options(voice.stt_model)),
         llm=GraphLLM(),
         tts=speech,
         vad=ctx.proc.userdata["vad"],

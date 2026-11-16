@@ -75,7 +75,7 @@ async def _speak(items, *, notice=0.05, abandon=0.15, failed=lambda: False, dela
 class TestSpokenAnswer:
     async def test_a_quick_answer_is_spoken_whole(self):
         said, outcome = await _speak(["A P/E ratio compares price to earnings. ", "It is a ratio.", END])
-        assert "".join(said).strip() == "A P/E ratio compares price to earnings. It is a ratio."
+        assert "".join(said).strip() == "A P E ratio compares price to earnings. It is a ratio."  # P/E said as letters
         assert outcome.completed and outcome.first_token_s is not None
 
     async def test_written_disclaimer_is_not_spoken(self):

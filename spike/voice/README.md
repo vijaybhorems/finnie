@@ -338,10 +338,33 @@ The design doc's spike gate asks for time to first audio on both ElevenLabs mode
 
 v3 adds about 0.15 s to every turn. That's small next to the ~2 s of voice plumbing, but it's paid on every turn. v3 also streamed fine over the websocket. **Flash v2.5 stays the default.** Switch only if v3 sounds clearly better: compare `runs/scripted-20261110-233047.wav` (v3) with `runs/scripted-20261110-222904.wav` (Flash) by ear. Check the per-character price for each model on the ElevenLabs dashboard too.
 
+### Q&A and tax turns: where the extra ~2 s went (2026-11-16)
+
+Layer-5 simulated calls (`basic,noisy_room,follow_up,stock_question`, local LiveKit, 4 Q&A/tax turns and 1 market turn a run). "Heard" is the caller's clock, end of speech to the first audible frame; "worker" is LiveKit's turn decision + first text to TTS + TTS first byte. One run each, so these are medians of 4, not p95s.
+
+Where a Q&A turn's ~3.3 s (worker clock) went before: turn decision 0.58 s, **classifier 0.86 s** (early classification rarely finished in time), graph start and hydrate after the verdict ~0.15 s, Sonnet's first token ~0.85 s, **the first sentence ~0.45 s** (first sentences ran 25-35 words), and **~0.3 s more in LiveKit's sentence splitter** (TTS first byte 0.48 s against 0.10 s on a turn whose filler is flushed). Turns with a filler hid everything after the verdict.
+
+1. **Early classification started too late.** The final transcript queued behind an interim's Haiku call (often different words) and started after the turn had already begun its own. Final transcripts are now classified the moment they arrive.
+2. **The graph waited for the preamble's verdict.** It now starts beside it: hydrate (thread, profile, memory search) overlaps the classifier, and its classify step shares the same model call.
+3. **The classifier wrote a reason nobody hears.** ~185 output tokens a verdict, ~50 of them the reason. `voice.classifier_reason: false` asks for the decision alone: Haiku p50 **1.24 s → 0.89 s** (12 calls each). Written after the decision, it never changed it; chat keeps it (the page shows it).
+4. **The first sentence sat in LiveKit's sentence splitter** until the second began. The worker now flushes it (`FlushSentinel`): TTS first byte **0.48 s → 0.10 s**.
+5. **First sentences were long.** `_VOICE_INSTRUCTION` now asks for a ~10-word first sentence (per-request block; the cached prefix is unchanged). The model shortens them only partly (15-20 words).
+6. **Q&A and tax turns had no filler.** Even after 1-5, Sonnet's first sentence lands ~1.2 s after the verdict. "Let me explain." (finance_qa) and "Here's how that works." (tax_education) are said at the verdict, and the answer is ready when they finish.
+
+| First audio, median | Before | 1-5 (answer itself) | 1-6 (with filler) |
+|---|---|---|---|
+| Q&A / tax, heard | **4.64 s** (4.57-5.27) | 3.88 s (3.73-4.24) | **2.94 s** (2.65-3.45) |
+| Q&A / tax, worker | 3.32 s | 2.58 s | **1.40 s** (1.15-2.12) |
+| Live data (stock_question, filler already), heard | 2.50 s | 2.86 s | 2.65 s |
+| Classifier wait (`verdict_s`) | 0.86 s | 0.56 s | 0.46 s |
+| Turn start to first text to TTS (`llm_node_ttfs`) | 2.24 s | 1.88 s | 0.47-1.39 s (the filler) |
+
+All 5 checks passed in every run. Naturalness (Haiku judge, 5 answers) 4.8 before, 4.4 after 1-5 and 4.4 with the filler; the judge's deductions cite "on your screen" for a masked amount, RSI jargon and a repeated point, not the filler or the shorter first sentence. Against Open question 6 (≤1.8 s p50 for Q&A): met on the worker clock with the filler, not on the caller's clock, which adds ~1.2-1.5 s of VAD silence and transport on every turn (lever 1 below). The answer itself still starts ~2.6 s (worker) after the user stops: turn decision 0.58 + verdict ~0.55 + Sonnet first token ~0.85 + first sentence ~0.4 + TTS 0.1.
+
 ### Levers to try next, in order
 
 1. Tune the end-of-turn wait (VAD silence plus the 0.5 s endpointing delay) once real-mic tests show how often people pause mid-question. It's now the largest fixed cost (~1.1 s of every "heard" number).
-2. Run the classifier alongside hydrate (history and memories) instead of before it, for Q&A turns that get no filler.
+2. ~~Run the classifier alongside hydrate~~ Done (2026-11-16, above).
 3. A voice-keyed FAQ cache, to get the ~0.9 s path back for repeat questions.
 4. Use `query_tickers` in the news agent, so "Microsoft earnings news" searches for MSFT.
 5. Decide whether the chat page should also turn thinking off for some agents and use Haiku for the classifier. That needs answer-quality evals and a larger routing set first.

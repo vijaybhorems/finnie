@@ -2,8 +2,8 @@
 
 Pure (no LiveKit), so CI tests it. The worker wires it to LiveKit events.
 
-- `preamble()`: lines said before the answer: the filler on slow routes, and
-  the securities line when the turn is about specific securities. Said first
+- `preamble()`: lines said before the answer: the filler on every agent route
+  (prefetch.FILLERS), and the securities line when the turn is about specific securities. Said first
   so an interruption can't cut them off (design doc, Open question 3).
 - `spoken_answer()`: turns the graph's token stream into speech, with the
   slow-turn notice at `slow_turn_notice_seconds`, an apology and a stop at
@@ -80,6 +80,7 @@ class TurnOutcome:
     abandoned: bool = False   # no first token in time; SORRY said instead
     failed: bool = False      # the graph raised; SORRY said instead
     first_token_s: Optional[float] = None
+    first_spoken_s: Optional[float] = None  # the first speakable piece of the answer (a sentence)
 
 
 async def spoken_answer(
@@ -122,6 +123,8 @@ async def spoken_answer(
         if item is END:
             tail = shape(buffer.flush())
             if tail.strip():
+                if outcome.first_spoken_s is None:
+                    outcome.first_spoken_s = round(clock() - start, 3)
                 yield tail
             outcome.completed = True
             return
@@ -133,6 +136,8 @@ async def spoken_answer(
             outcome.first_token_s = round(clock() - start, 3)
         spoken = shape(buffer.push(strip_written_disclaimer(item)))
         if spoken.strip():
+            if outcome.first_spoken_s is None:
+                outcome.first_spoken_s = round(clock() - start, 3)
             yield spoken
 
 

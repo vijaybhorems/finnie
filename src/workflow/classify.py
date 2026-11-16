@@ -53,8 +53,8 @@ _AGENT_MAP: dict[str, AgentType] = {
 }
 
 
-class Verdict(BaseModel):
-    """Structured classifier output — scope gate and routing in one shot."""
+class Routing(BaseModel):
+    """The decision alone: what the classifier asks for when no reason is wanted."""
 
     on_topic: bool = Field(
         description=(
@@ -94,6 +94,13 @@ class Verdict(BaseModel):
             "False when it stands on its own, or when no earlier conversation is given."
         ),
     )
+
+
+class Verdict(Routing):
+    """Structured classifier output — scope gate and routing in one shot."""
+
+    # Last, so it is written after the decision and can't change it. Asked for
+    # only with llm.classifier_reason; otherwise "".
     reason: str = Field(default="", description="One short sentence explaining the decision.")
 
 
@@ -250,7 +257,8 @@ def classify_query(query: str, callbacks: Optional[list] = None, context: str = 
     worker counts tokens this way).
     """
     settings = get_settings()
-    key = (settings.llm.classifier_model or settings.llm.model, _normalize(query), context)
+    with_reason = settings.llm.classifier_reason
+    key = (f"{settings.llm.classifier_model or settings.llm.model}:{int(with_reason)}", _normalize(query), context)
     with _verdicts_lock:
         key_lock = _key_locks.setdefault(key, threading.Lock())
     with key_lock:
@@ -261,7 +269,7 @@ def classify_query(query: str, callbacks: Optional[list] = None, context: str = 
             return hit[1]
 
         llm = get_llm(streaming=False, model=settings.llm.classifier_model)
-        verdict = llm.with_structured_output(Verdict).invoke(
+        verdict = llm.with_structured_output(Verdict if with_reason else Routing).invoke(
             [
                 {"role": "system", "content": _CLASSIFY_SYSTEM},
                 {"role": "user", "content": f"{context}\n\nClassify this query: {query}" if context
@@ -273,6 +281,8 @@ def classify_query(query: str, callbacks: Optional[list] = None, context: str = 
             raise ValueError("classifier returned no verdict")
         if isinstance(verdict, dict):
             verdict = Verdict(**verdict)
+        elif not isinstance(verdict, Verdict):
+            verdict = Verdict(**verdict.model_dump())  # reason ""
 
         with _verdicts_lock:
             if len(_verdicts) >= _VERDICT_MAX:

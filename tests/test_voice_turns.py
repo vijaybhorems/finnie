@@ -41,6 +41,11 @@ class TestPreamble:
         assert preamble(_verdict("market_analysis", ["AAPL"])) == [FILLERS["market_analysis"], SECURITIES_LINE]
         assert preamble(_verdict("market_analysis", ["AAPL"]), filler=False) == [SECURITIES_LINE]
 
+    @pytest.mark.parametrize("agent", ["finance_qa", "tax_education"])
+    def test_qa_and_tax_turns_get_a_filler_too(self, agent):
+        """Their first sentence lands ~1.3 s after the verdict; the filler is heard first."""
+        assert preamble(_verdict(agent)) == [FILLERS[agent]]
+
     def test_securities_line_never_depends_on_the_filler_switch(self):
         assert preamble(_verdict("portfolio"), filler=False) == [SECURITIES_LINE]
 

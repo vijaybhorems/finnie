@@ -24,7 +24,8 @@ STEPS = [
     ("end_of_turn_delay_s", "turn decision"),      # end of speech -> LiveKit decides the turn ended
     ("transcription_delay_s", "final transcript"),  # end of speech -> final transcript
     ("verdict_s", "classifier"),                    # ~0 when classified while the user spoke
-    ("finnie_first_token_s", "first token"),        # graph start -> first answer token
+    ("finnie_first_token_s", "first token"),        # verdict -> first answer token
+    ("finnie_first_sentence_s", "first answer sentence"),  # verdict -> first whole sentence (SpeechBuffer)
     ("llm_node_ttfs_s", "first sentence"),          # turn start -> first sentence sent to speech
     ("tts_ttfb_s", "speech first byte"),            # text-to-speech first audio
     ("time_to_first_audio_s", "first audio"),       # end of speech -> first audio, all of it

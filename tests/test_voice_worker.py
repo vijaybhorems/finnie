@@ -181,3 +181,88 @@ async def test_each_answer_reaches_the_page_written_in_full(graph, monkeypatch):
         (USER, {"type": "answer", "turn": 1, "agent": "portfolio", "answer": "Your portfolio is worth $48,250."}),
         (USER, {"type": "answer", "turn": 2, "agent": "error", "answer": SORRY}),
     ]
+
+
+async def test_the_graph_starts_while_the_verdict_is_still_coming(graph, monkeypatch):
+    """The graph loads the thread and user data during the classifier call, not after it."""
+    import threading
+
+    graph_started = threading.Event()
+    from src.workflow import graph as graph_module
+
+    stub = graph_module.stream_workflow
+
+    def stream_workflow(question, sink=None, **kwargs):
+        graph_started.set()
+        yield from stub(question, sink=sink, **kwargs)
+
+    def classify_query(question, callbacks=None, context=""):
+        graph["classified"].append((question, graph_started.wait(timeout=5)))
+        return SimpleNamespace(on_topic=True, agent="finance_qa", tickers=[])
+
+    monkeypatch.setattr("src.workflow.graph.stream_workflow", stream_workflow)
+    monkeypatch.setattr("src.workflow.classify.classify_query", classify_query)
+    said = await _say("what is a p e ratio", _agent())
+    assert graph["classified"] == [("what is a p e ratio", True)]
+    assert "A P E ratio compares price to earnings." in said
+
+
+async def _items(agent: worker.FinnieVoiceAgent, text: str) -> list[Any]:
+    from livekit.agents import ModelSettings, llm
+
+    ctx = llm.ChatContext()
+    ctx.add_message(role="user", content=text)
+    return [item async for item in agent.llm_node(ctx, [], ModelSettings())]
+
+
+async def test_the_first_sentence_goes_to_speech_at_once(graph):
+    """Flushed after the first sentence: the sentence splitter would hold it until the next began."""
+    from livekit.agents.types import FlushSentinel
+
+    graph["answer"] = "A P/E ratio compares price to earnings. A high one means investors expect growth. More?"
+    items = await _items(_agent(), "what is a p e ratio")
+    flushes = [i for i, item in enumerate(items) if isinstance(item, FlushSentinel)]
+    assert len(flushes) == 1
+    assert "".join(items[:flushes[0]]).strip() == "A P E ratio compares price to earnings."
+
+
+async def test_the_filler_is_flushed_before_the_answer(graph, monkeypatch):
+    from livekit.agents.types import FlushSentinel
+
+    from src.voice.prefetch import FILLERS
+
+    monkeypatch.setattr(worker, "FILLER", True)
+    graph.update(answer="Starting at age 30 helps. A lot.", agent="goal_planning", verdict_agent="goal_planning")
+    items = await _items(_agent(), "how much should i save to retire")
+    assert items[0] == FILLERS["goal_planning"] and isinstance(items[1], FlushSentinel)
+
+
+async def test_a_final_transcript_is_classified_at_once(graph, monkeypatch):
+    """Not queued behind an interim's call: the final wording exists only at the end."""
+    import asyncio
+    import threading
+
+    release = threading.Event()
+
+    def classify_query(question, callbacks=None, context=""):
+        graph["classified"].append(question)
+        if question == "what is a p":
+            release.wait(timeout=5)  # an interim's call still running
+        return SimpleNamespace(on_topic=True, agent="finance_qa", tickers=[])
+
+    monkeypatch.setattr("src.workflow.classify.classify_query", classify_query)
+    monkeypatch.setattr(worker, "SPECULATE", True)
+    agent = _agent()
+    agent.on_transcript("what is a p", is_final=False)
+    await asyncio.sleep(0.05)  # its classification is under way
+    agent.on_transcript("what is a pe ratio", is_final=False)  # queued behind the first
+    agent.on_transcript("what is a pe ratio", is_final=True)   # starts now
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        if "what is a pe ratio" in graph["classified"]:
+            break
+    assert graph["classified"] == ["what is a p", "what is a pe ratio"]
+    release.set()
+    await asyncio.sleep(0.1)
+    # The queued interim has the same words and context: not classified twice.
+    assert graph["classified"] == ["what is a p", "what is a pe ratio"]

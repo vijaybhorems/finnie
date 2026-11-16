@@ -26,4 +26,7 @@ def configure_process() -> None:
     # faster per turn (spike/voice/compare_classifier.py).
     if not os.environ.get("FINNIE_CLASSIFIER_MODEL"):
         settings.llm.classifier_model = voice.classifier_model
+    # Nobody reads a voice turn's routing reason, and writing it is ~0.35 s of
+    # every turn's wait for a verdict.
+    settings.llm.classifier_reason = voice.classifier_reason
     settings.persistence.pool_max_size = min(settings.persistence.pool_max_size, voice.db_pool_max_size)

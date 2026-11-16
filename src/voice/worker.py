@@ -171,30 +171,41 @@ class FinnieVoiceAgent(Agent):
         so_far = " ".join(t for t in [*self._finals, self._interim] if t)
         if len(so_far.split()) < 3:
             return
-        if self._spec_running:
+        if is_final:
+            # At once, not queued behind an interim's call: the turn usually
+            # starts ~0.3 s after the final transcript, and the full wording of
+            # a short question exists only now. classify_query shares one model
+            # call between this and the turn's own classify of the same words.
+            asyncio.ensure_future(self._classify_early(so_far))
+        elif self._spec_running:
             self._spec_pending = so_far  # only the newest text matters
         else:
             asyncio.ensure_future(self._speculate(so_far))
 
     async def _speculate(self, text: str) -> None:
-        from src.workflow.classify import _normalize, classify_query, is_acknowledgement
-        from src.workflow.guardrail import _matches_blocklist
-
+        """Interim transcripts: one classification at a time, the newest text next."""
         self._spec_running = True
         try:
             while text:
-                key, context = _normalize(text), self._classify_context()
-                if ((key, context) not in self._spec_done and not _matches_blocklist(text)
-                        and not is_acknowledgement(text)):
-                    self._spec_done.add((key, context))
-                    logger.info("voice_speculative_classify", words=len(key.split()))
-                    try:
-                        await asyncio.to_thread(classify_query, text, [self.tokens], context)
-                    except Exception:  # noqa: BLE001 — the turn classifies again and fails closed
-                        pass
+                await self._classify_early(text)
                 text, self._spec_pending = self._spec_pending or "", None
         finally:
             self._spec_running = False
+
+    async def _classify_early(self, text: str) -> None:
+        """Classify `text` once per context; fills classify_query's verdict cache."""
+        from src.workflow.classify import _normalize, classify_query, is_acknowledgement
+        from src.workflow.guardrail import _matches_blocklist
+
+        key, context = _normalize(text), self._classify_context()
+        if (key, context) in self._spec_done or _matches_blocklist(text) or is_acknowledgement(text):
+            return
+        self._spec_done.add((key, context))
+        logger.info("voice_speculative_classify", words=len(key.split()))
+        try:
+            await asyncio.to_thread(classify_query, text, [self.tokens], context)
+        except Exception:  # noqa: BLE001 — the turn classifies again and fails closed
+            pass
 
     # ── The turn ────────────────────────────────────────────────────────────
 
@@ -225,7 +236,9 @@ class FinnieVoiceAgent(Agent):
     ) -> AsyncIterable[str | FlushSentinel]:
         question, confidence = _last_user_turn(chat_ctx)
         question = clean_transcript(question)
-        self._finals, self._interim = [], ""  # the next turn's transcript starts fresh
+        # The next turn's transcript starts fresh. A pending interim is this
+        # turn's words, and would be classified with the next turn's context.
+        self._finals, self._interim, self._spec_pending = [], "", None
         if not question:
             return
         if self.monitor is not None:
@@ -238,13 +251,11 @@ class FinnieVoiceAgent(Agent):
         self.turn_no += 1
         turn_no = self.turn_no
         started = time.perf_counter()
-        lines = await self._preamble_for(question, self._classify_context())
-        verdict_s = round(time.perf_counter() - started, 3)
-        for line in lines:
-            yield line
-            # Speak it now. Without this, ElevenLabs' sentence splitter holds the
-            # line until the answer's first words arrive, which defeats it.
-            yield FlushSentinel()
+        # The verdict (for the preamble) and the graph run side by side: the
+        # graph loads the thread and the user's data while the classifier
+        # answers, and its own classify step waits for the same model call
+        # (classify_query shares it) instead of starting after the preamble.
+        verdict = asyncio.ensure_future(self._preamble_for(question, self._classify_context()))
         voice = get_settings().voice
         # Read each turn, so the call bar's switch applies from the next answer.
         speak = await asyncio.to_thread(_speak_amounts, self.user_id, self.thread_id)
@@ -297,8 +308,17 @@ class FinnieVoiceAgent(Agent):
         # (design doc: "When the user interrupts").
         threading.Thread(target=produce, name="finnie-turn", daemon=True).start()
 
+        lines = await verdict
+        verdict_s = round(time.perf_counter() - started, 3)
+        for line in lines:
+            yield line
+            # Speak it now. Without this, ElevenLabs' sentence splitter holds the
+            # line until the answer's first words arrive, which defeats it.
+            yield FlushSentinel()
+
         outcome = TurnOutcome()
         said: list[str] = []
+        first_piece = True
         try:
             async for spoken in spoken_answer(
                 queue.get, outcome,
@@ -310,6 +330,13 @@ class FinnieVoiceAgent(Agent):
                 said.append(spoken)
                 yield spoken
                 if spoken in STANDALONE_LINES:
+                    yield FlushSentinel()
+                elif first_piece:
+                    # The answer's first sentence, complete (SpeechBuffer releases
+                    # whole sentences). The sentence splitter would hold it until
+                    # the next one starts, ~0.3-0.5 s later; later ones play
+                    # behind it, so only the first is pushed.
+                    first_piece = False
                     yield FlushSentinel()
         finally:
             # Runs on interruption too (LiveKit closes this generator), so an
@@ -323,6 +350,7 @@ class FinnieVoiceAgent(Agent):
                 "agent": sink.get("agent_used"),
                 "cache_hit": sink.get("cache_hit"),
                 "finnie_first_token_s": outcome.first_token_s,
+                "finnie_first_sentence_s": outcome.first_spoken_s,  # first token + SpeechBuffer's wait
                 "finnie_total_s": round(time.perf_counter() - timing["started"], 3),
                 "finnie_completed": outcome.completed,
                 "abandoned": outcome.abandoned,

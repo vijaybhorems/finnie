@@ -96,6 +96,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   border-color: #0E7C66; box-shadow: 0 6px 18px rgba(14,124,102,.12); transform: translateY(-1px);
 }
 .st-key-fn-prompts button p { font-size: .9rem; line-height: 1.35; }
+/* Talk, beside the chat input: sized before the web font loads, so give the label room. */
+.st-key-voice_talk button { min-width: 5.5rem; }
+.st-key-voice_talk button [data-testid="stMarkdownContainer"] { overflow: visible; }
 
 /* ── Chat ───────────────────────────────────────────────────────────────── */
 [data-testid="stChatMessage"] { padding: .9rem 1.1rem; border-radius: 1rem; gap: .9rem; }
@@ -122,16 +125,17 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .block-container h3 { font-size: 1.2rem; font-weight: 650; padding-top: .6rem; }
 [data-testid="stExpander"] details { border-radius: .8rem; }
 [data-testid="stPopover"] button p { white-space: nowrap; }
-/* Memory delete buttons sit in a narrow sidebar column: show only the icon, and
+/* Memory and voice-call delete buttons sit in a narrow sidebar column: show only the icon, and
    keep the label off-screen rather than display:none so screen readers still read it. */
-.st-key-fn-memories button { padding: .25rem; color: #5B6B7A; }
-.st-key-fn-memories button:hover { color: #C0392B; }
-.st-key-fn-memories button [data-testid="stMarkdownContainer"] {
+.st-key-fn-memories button, .st-key-fn-voice-calls button { padding: .25rem; color: #5B6B7A; }
+.st-key-fn-memories button:hover, .st-key-fn-voice-calls button:hover { color: #C0392B; }
+.st-key-fn-memories button [data-testid="stMarkdownContainer"],
+.st-key-fn-voice-calls button [data-testid="stMarkdownContainer"] {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 /* columns(wrap=False) gives each column a 128px floor, which overrides the 5:1 split
    in a phone-width sidebar and makes the row scroll sideways. */
-.st-key-fn-memories [data-testid="stColumn"] { min-width: 0; }
+.st-key-fn-memories [data-testid="stColumn"], .st-key-fn-voice-calls [data-testid="stColumn"] { min-width: 0; }
 
 /* ── Mobile ─────────────────────────────────────────────────────────────── */
 /* The tab bar is for phones only; wider screens keep the sidebar open.

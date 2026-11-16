@@ -22,7 +22,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, AsyncIterable
+from typing import Any, AsyncIterable, Awaitable, Callable
 
 from dotenv import load_dotenv
 
@@ -55,6 +55,7 @@ from src.voice.access import VOICE_UNAVAILABLE, check_join, new_voice_room  # no
 from src.voice.memory import MemorySaves, should_remember  # noqa: E402
 from src.voice.limits import DAILY_LIMIT, ENDS_CALL, LINES, TURN_LIMIT, CallMonitor  # noqa: E402
 from src.voice.health import DEEPGRAM, ELEVENLABS, VendorHealth  # noqa: E402
+from src.voice.page_events import SPEECH_DOWN, TOPIC, answer_event, encode, notice_event, spoken_event  # noqa: E402
 from src.voice.prefetch import warm_shared_data  # noqa: E402
 from src.voice.speech import SESSION_DISCLAIMER  # noqa: E402
 from src.voice.runtime import configure_process  # noqa: E402
@@ -115,6 +116,7 @@ class FinnieVoiceAgent(Agent):
         self._heard_before_interrupt: str | None = None
         self.memories = MemorySaves()  # waited for when the call ends
         self.turns: list[dict[str, Any]] = []
+        self.turn_no = 0  # numbers the page's answer cards; 0 is the opening disclaimer
         # Speculation state for the turn being spoken.
         self._finals: list[str] = []
         self._interim = ""
@@ -215,6 +217,8 @@ class FinnieVoiceAgent(Agent):
                 yield TURN_LIMIT  # instead of answering; _enforce_limits ends the call after it
                 return
         heard, self._heard_before_interrupt = self._heard_before_interrupt, None
+        self.turn_no += 1
+        turn_no = self.turn_no
         started = time.perf_counter()
         lines = await self._preamble_for(question)
         verdict_s = round(time.perf_counter() - started, 3)
@@ -227,6 +231,7 @@ class FinnieVoiceAgent(Agent):
         # Read each turn, so the call bar's switch applies from the next answer.
         speak = await asyncio.to_thread(_speak_amounts, self.user_id, self.thread_id)
         loop = asyncio.get_running_loop()
+        to_page = page_sender(self.user_id)  # bound here: the graph's thread has no job context
         queue: asyncio.Queue = asyncio.Queue()
         sink: dict[str, Any] = {}
         timing = {"started": time.perf_counter()}
@@ -246,6 +251,12 @@ class FinnieVoiceAgent(Agent):
                 loop.call_soon_threadsafe(queue.put_nowait, "")
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, END)
+                # The full written answer, for the page, even if the user cut the speech short.
+                answer = answer_event(turn_no, sink.get("agent_used"), sink.get("final_response"))
+                try:
+                    asyncio.run_coroutine_threadsafe(to_page(answer), loop)
+                except RuntimeError:
+                    pass  # the call ended while the graph was still answering
                 # The run finished, even if the user interrupted the answer:
                 # learn from what they said, as the chat page does.
                 if should_remember(sink.get("agent_used"), confidence, voice):
@@ -306,6 +317,36 @@ def _speak_amounts(user_id: str, thread_id: str) -> bool:
     except Exception as exc:  # noqa: BLE001 — discreet is the safe default
         logger.warning("voice_speak_amounts_unread", error=type(exc).__name__)
         return False
+
+
+def page_sender(user_id: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """A sender of events to the caller's page only, bound to this job's room.
+
+    Call it on the job's event loop: LiveKit keeps the job in a context variable,
+    which a coroutine scheduled from another thread (the graph's) doesn't see.
+    Sending is best effort: the call goes on without it.
+    """
+    from livekit.agents import get_job_context
+
+    try:
+        room = get_job_context().room
+    except RuntimeError:  # no job: the text-mode tests
+        room = None
+
+    async def send(event: dict[str, Any]) -> None:
+        if room is None:
+            return
+        try:
+            await room.local_participant.send_text(encode(event), topic=TOPIC, destination_identities=[user_id])
+        except Exception as exc:  # noqa: BLE001 — the page just misses this event
+            logger.warning("voice_page_event_not_sent", kind=event.get("type"), error=type(exc).__name__)
+
+    return send
+
+
+async def send_to_page(user_id: str, event: dict[str, Any]) -> None:
+    """Send `event` to the caller's page, from the job's event loop."""
+    await page_sender(user_id)(event)
 
 
 def _last_user_turn(chat_ctx: llm.ChatContext) -> tuple[str, float | None]:
@@ -513,10 +554,17 @@ async def entrypoint(ctx: JobContext) -> None:
         # The rest of the call moves to the backup once the main voice fails.
         speech = tts.FallbackAdapter(voices, max_retry_per_tts=1)
 
+        voices_down: set[int] = set()
+
         @speech.on("tts_availability_changed")
         def _on_voice_availability(event: Any) -> None:
-            if not event.available:
-                vendor_failed(_vendor_of(event.tts), "tts_unavailable")
+            if event.available:
+                voices_down.discard(id(event.tts))
+                return
+            vendor_failed(_vendor_of(event.tts), "tts_unavailable")
+            voices_down.add(id(event.tts))
+            if len(voices_down) == len(voices):  # nothing left to speak with
+                asyncio.ensure_future(send_to_page(user_id, notice_event(SPEECH_DOWN)))
 
     stalls = StallWatch(voice.stt_stall_seconds, voice.stt_stalls_to_end)
     session = AgentSession(
@@ -564,6 +612,10 @@ async def entrypoint(ctx: JobContext) -> None:
         if getattr(item, "interrupted", False):
             # LiveKit keeps only what was played in the item: tell the next turn.
             agent.note_interrupted(item.text_content or "")
+        # What was actually said, beneath the written answer (turn 0: the disclaimer).
+        asyncio.ensure_future(send_to_page(user_id, spoken_event(
+            agent.turn_no, item.text_content or "", bool(getattr(item, "interrupted", False)),
+        )))
         if not agent.turns:
             return
         record = {

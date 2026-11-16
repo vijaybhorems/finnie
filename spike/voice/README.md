@@ -20,6 +20,7 @@ The worker, speech shaping and prefetch moved to `src/voice/` in the Safeguards 
 | `src/voice/health.py` | Deepgram and ElevenLabs circuit breakers shared through the cache (Redis). Tested in `tests/test_voice_health.py`. |
 | `local_token.py` | Local tools mint through `src/voice/tokens.py` as `g-local-<name>` with `VOICE_TEST_EMAIL` (default `tester@example.com`); `raw_call()` signs one directly to test refusals. |
 | `talk_page.py` | Local Streamlit page with Talk and End buttons and a live transcript. Mints mic-only, 10-minute tokens. |
+| `page_harness.py` | The real Chat page with Talk, the call view and the Voice calls panel, as a fixed test user without Google sign-in. |
 | `measure_turns.py` | Times Finnie's share of latency (classifier, first sentence, total) with no voice vendors involved. |
 | `compare_classifier.py` | Runs the production classifier over the eval suite's 44 labelled cases per model and thinking setting: routing and scope accuracy, p50/p95 latency. |
 | `src/voice/prefetch.py` | The live data warmed while the user speaks, and the filler lines said on slow turns. |
@@ -70,6 +71,12 @@ FINNIE_VOICE_ENABLED=1 FINNIE_VOICE_ALLOWED_EMAILS=tester@example.com VOICE_TURN
 
 ```bash
 PYTHONPATH=. .venv-voice/bin/streamlit run spike/voice/talk_page.py --server.port 8520
+```
+
+To test the app's own Chat page (Talk beside the chat box, the call view, the Voice calls panel), run the harness instead, with the worker and the harness on the same `DATABASE_URL` so the sidebar sees the calls the worker records:
+
+```bash
+DATABASE_URL=postgresql://localhost:5432/finnie_voice PYTHONPATH=. .venv/bin/streamlit run spike/voice/page_harness.py --server.port 8530
 ```
 
 To test without a browser, use the laptop mic and speaker directly (no room or token, so no join checks; it runs as `g-local-console`):

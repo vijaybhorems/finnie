@@ -20,7 +20,7 @@ from livekit.agents import AgentSession  # noqa: E402
 
 from src.voice import worker  # noqa: E402
 from src.voice.speech import AMOUNT_ON_SCREEN  # noqa: E402
-from src.voice.turns import SECURITIES_LINE  # noqa: E402
+from src.voice.turns import SECURITIES_LINE, SORRY  # noqa: E402
 
 USER, THREAD = "g-1", "g-1:" + "a" * 32
 
@@ -48,6 +48,7 @@ def graph(monkeypatch):
         yield from state["answer"].split(" ")[:1]
         for word in state["answer"].split(" ")[1:]:
             yield " " + word
+        sink["final_response"] = state["answer"]  # as stream_workflow fills it, for the page
 
     def classify_query(question):
         return SimpleNamespace(on_topic=True, agent=state["verdict_agent"], tickers=state["tickers"])
@@ -121,3 +122,28 @@ async def test_the_turn_limit_says_goodbye_instead_of_answering(graph, monkeypat
     agent.monitor = SimpleNamespace(turn_limit_reached=False, start_turn=lambda: False)
     assert TURN_LIMIT in await _say("one more question", agent)
     assert graph["calls"] == []
+
+
+async def test_each_answer_reaches_the_page_written_in_full(graph, monkeypatch):
+    """The page shows the full written answer, amounts included, numbered by turn."""
+    import asyncio
+
+    sent: list[tuple[str, dict]] = []
+
+    def page_sender(user_id):
+        async def send(event):
+            sent.append((user_id, event))
+        return send
+
+    monkeypatch.setattr(worker, "page_sender", page_sender)
+    graph.update(answer="Your portfolio is worth $48,250.", agent="portfolio", verdict_agent="portfolio")
+    agent = _agent()
+    await _say("how is my portfolio", agent)
+    graph["agent"] = "error"
+    await _say("and now", agent)
+    await asyncio.sleep(0.1)  # sent from the graph's thread as each run finishes
+
+    assert sent == [
+        (USER, {"type": "answer", "turn": 1, "agent": "portfolio", "answer": "Your portfolio is worth $48,250."}),
+        (USER, {"type": "answer", "turn": 2, "agent": "error", "answer": SORRY}),
+    ]

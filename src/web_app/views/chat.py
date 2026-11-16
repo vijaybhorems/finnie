@@ -16,6 +16,7 @@ from src.core.llm import message_text
 from src.web_app.markdown import render_safe, render_safe_stream
 from src.web_app.theme import page_header
 from src.memory.service import schedule_remember_turn
+from src.web_app import voice
 from src.web_app.session import current_user_data, persisted
 from src.workflow.graph import (
     AGENT_NAMES,
@@ -56,6 +57,12 @@ _FINNIE_AVATAR = ":material/insights:"
 def render_chat_page() -> None:
     _ensure_conversation()
 
+    # During a call the typed conversation steps aside; it is back when the call ends.
+    if voice.in_call():
+        page_header("🎙️", "Voice call", "Finnie answers aloud; the full answers appear here")
+        voice.render_voice_session(_AGENT_LABELS)
+        return
+
     if not st.session_state.messages:
         _render_empty_state()
     else:
@@ -81,10 +88,21 @@ def render_chat_page() -> None:
         _process_message(user_input)
         st.rerun()
 
-    # Chat input
-    if user_input := st.chat_input("Ask about investing, markets, taxes or planning…"):
+    # Chat input, with Talk beside it for users voice is offered to.
+    if user_input := _chat_input():
         _process_message(user_input)
         st.rerun()
+
+
+def _chat_input() -> Optional[str]:
+    placeholder = "Ask about investing, markets, taxes or planning…"
+    bottom = getattr(st, "bottom", None)  # the pinned area st.chat_input lives in
+    if bottom is None or not voice.voice_offered():
+        return st.chat_input(placeholder)
+    with bottom, st.container(horizontal=True, vertical_alignment="bottom", wrap=False, key="fn-input-row"):
+        user_input = st.chat_input(placeholder)
+        voice.render_talk_button(st)
+    return user_input
 
 
 def _render_empty_state() -> None:

@@ -137,6 +137,8 @@ voice:
   classifier_model: "claude-haiku-5-5"   # the worker's process only
   llm_thinking: "disabled"               # the worker's process only
   db_pool_max_size: 2         # per worker process
+  idle_processes: 2           # calls the worker can take at once without loading first (~850 MB each)
+  job_memory_warn_mb: 1500    # log a call process above this
   tokens_per_hour: 10         # calls a user may start per hour
   token_ttl_minutes: 10       # time to join with a token; the call itself continues
   max_call_minutes: 20

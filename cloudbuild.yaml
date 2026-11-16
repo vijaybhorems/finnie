@@ -24,6 +24,18 @@ substitutions:
   # throttling is off below) so visitors never wait for a cold start.
   # 0 scales to zero when idle: free, but slow to wake.
   _MIN_INSTANCES: "1"
+  # Voice worker (src/voice/worker.py) as a Cloud Run worker pool. Off until
+  # deploy/setup_gcp.sh's Voice stage has stored the LiveKit and speech keys; it
+  # then saves _VOICE=1 in the deploy command.
+  _VOICE: "0"
+  _VOICE_POOL: finnie-voice
+  _VOICE_IMAGE_NAME: finnie-voice
+  # Each call runs in its own ~850 MB process; voice.idle_processes (2) stay loaded.
+  # 8 GiB holds those plus about four calls at once; LiveKit stops giving the
+  # instance calls at 70% CPU. One instance while voice is for testers.
+  _VOICE_MEMORY: 8Gi
+  _VOICE_CPU: "2"
+  _VOICE_INSTANCES: "1"
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -97,3 +109,49 @@ steps:
       # Cloud SQL via the built-in connector: a Unix socket at /cloudsql/<instance>.
       - --add-cloudsql-instances=${_CLOUDSQL_INSTANCE}
       - --update-secrets=DATABASE_URL=DATABASE_URL:latest
+
+  # ── Voice worker: skipped unless _VOICE=1 ───────────────────────────────────
+  # Built after the app so it reuses the builder stage's layers (same Docker
+  # daemon), while the app image is pushed and deployed.
+  - id: build-voice
+    name: gcr.io/cloud-builders/docker
+    waitFor: [build]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -eu
+        if [ "${_VOICE}" != "1" ]; then echo "voice off (_VOICE=${_VOICE}): not building the worker"; exit 0; fi
+        docker build -f docker/Dockerfile --target voice \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}:$BUILD_ID \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}:latest .
+        docker push --all-tags ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}
+
+  # After the app's deploy, so the app's migrations have run before the worker
+  # starts. Its keys, voice flag and allowlist are copied from the app service
+  # (deploy/worker_env.py), so the two can't drift apart.
+  #
+  # A worker pool gets 10 s between SIGTERM and SIGKILL, so a deploy ends calls in
+  # progress (the page says "The call dropped"). Fine while voice is for testers;
+  # revisit before general availability (design doc, Open question 2).
+  - id: deploy-voice
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -eu
+        if [ "${_VOICE}" != "1" ]; then echo "voice off (_VOICE=${_VOICE}): not deploying the worker"; exit 0; fi
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /workspace/app-service.json
+        ENV_VARS="$$(python3 deploy/worker_env.py env /workspace/app-service.json)"
+        SECRETS="$$(python3 deploy/worker_env.py secrets /workspace/app-service.json)"
+        gcloud run worker-pools deploy ${_VOICE_POOL} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}:$BUILD_ID \
+          --region=${_REGION} \
+          --instances=${_VOICE_INSTANCES} \
+          --cpu=${_VOICE_CPU} \
+          --memory=${_VOICE_MEMORY} \
+          --service-account=${_RUNTIME_SA} \
+          --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
+          --update-env-vars="$$ENV_VARS" \
+          --update-secrets="$$SECRETS"

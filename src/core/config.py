@@ -206,6 +206,11 @@ class VoiceConfig(BaseModel):
     # The worker holds few concurrent turns per process; chat's pool size would
     # multiply Cloud SQL connections by the number of worker processes.
     db_pool_max_size: int = 2
+    # Each call runs in its own process, which loads the embedding model and the
+    # graph (~850 MB, 15-40 s). LiveKit keeps this many loaded and waiting; its
+    # production default, 14, would need ~12 GB per worker instance.
+    idle_processes: int = 2
+    job_memory_warn_mb: int = 1500  # LiveKit's 1000 MB default sits below one idle process
     # Starting a call (src/voice/tokens.py).
     tokens_per_hour: int = 10
     token_ttl_minutes: int = 10  # to join; a joined call outlives its token

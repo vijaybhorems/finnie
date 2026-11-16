@@ -187,7 +187,7 @@ finish() {
 # One-time Google Cloud setup for Finnie's database-backed features
 # (persistence, pgvector knowledge base, FAQ cache, memory):
 #   Cloud SQL for PostgreSQL · DATABASE_URL secret · least-privilege runtime
-#   service account · Cloud Build deploy permissions · first deploy.
+#   service account · Cloud Build deploy permissions · voice (optional) · first deploy.
 #
 # Idempotent: every stage checks what already exists, so re-running is safe.
 # Non-secret choices are remembered in deploy/.gcp.env (git-ignored); the
@@ -195,7 +195,7 @@ finish() {
 # to disk or printed.
 
 ENV_FILE="${ENV_FILE:-deploy/.gcp.env}"
-TOTAL_STAGES=7
+TOTAL_STAGES=8
 
 # Is a resource there already? (Runs a describe; true if it succeeds.)
 exists() { "$@" >/dev/null 2>&1; }
@@ -331,8 +331,105 @@ printf '  %s✓%s roles/iam.serviceAccountUser on %s\n' "$GREEN" "$RESET" "$RUNT
 pause
 
 # ── 7 ─────────────────────────────────────────────────────────────────────
+stage "Voice calls (optional)"
+# store_secret NAME "Prompt": hidden input straight into Secret Manager, never to
+# disk or the screen. Enter keeps a version that's already stored.
+store_secret() {
+  local name="$1" prompt="$2" value="" have=0
+  exists gcloud secrets describe "$name" && have=1
+  if (( have )); then
+    printf '  %s%s%s %s[Enter keeps the stored one]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
+  else
+    printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
+  fi
+  read -rs value || true
+  printf '\n'
+  if [[ -z "$value" ]]; then
+    if (( have )); then note "kept $name"; return 0; fi
+    warn "$name not set: voice can't start without it"; VOICE_READY=0; return 0
+  fi
+  if (( have )); then
+    printf '%s' "$value" | gcloud secrets versions add "$name" --data-file=- >/dev/null
+  else
+    printf '%s' "$value" | gcloud secrets create "$name" --data-file=- >/dev/null
+  fi
+  unset value
+  gcloud secrets add-iam-policy-binding "$name" --member="serviceAccount:$RUNTIME_SA" \
+    --role=roles/secretmanager.secretAccessor >/dev/null
+  printf '  %s✓%s %s stored in Secret Manager (readable by %s)\n' "$GREEN" "$RESET" "$name" "$RUNTIME_SA"
+}
+
+VOICE="$(_existing VOICE || echo 0)"
+say "Voice adds a Talk button beside the chat box for the emails you allow. The"
+say "audio goes through LiveKit Cloud; a worker (Cloud Run worker pool 'finnie-voice')"
+say "turns speech into text with Deepgram, runs the same graph, and speaks with"
+say "ElevenLabs. It needs four accounts' keys. Skip this stage to keep voice as it is."
+if confirm "Set up or change voice now?"; then
+  VOICE_READY=1
+  say ""
+  say "LiveKit: create a project at cloud.livekit.io (one per environment), in the"
+  say "region nearest $GCP_REGION. Settings → Keys shows its URL, API key and secret."
+  open_url "https://cloud.livekit.io/"
+  ask LIVEKIT_URL_INPUT "LiveKit URL (wss://<project>.livekit.cloud):"
+  if [[ -n "$LIVEKIT_URL_INPUT" ]]; then
+    [[ "$LIVEKIT_URL_INPUT" == wss://* ]] || warn "expected a wss:// URL; storing it anyway"
+    if exists gcloud secrets describe LIVEKIT_URL; then
+      printf '%s' "$LIVEKIT_URL_INPUT" | gcloud secrets versions add LIVEKIT_URL --data-file=- >/dev/null
+    else
+      printf '%s' "$LIVEKIT_URL_INPUT" | gcloud secrets create LIVEKIT_URL --data-file=- >/dev/null
+    fi
+    gcloud secrets add-iam-policy-binding LIVEKIT_URL --member="serviceAccount:$RUNTIME_SA" \
+      --role=roles/secretmanager.secretAccessor >/dev/null
+    printf '  %s✓%s LIVEKIT_URL stored\n' "$GREEN" "$RESET"
+  elif ! exists gcloud secrets describe LIVEKIT_URL; then
+    warn "LIVEKIT_URL not set: voice can't start without it"; VOICE_READY=0
+  fi
+  store_secret LIVEKIT_API_KEY    "LiveKit API key (hidden):"
+  store_secret LIVEKIT_API_SECRET "LiveKit API secret (hidden):"
+  say ""
+  say "Deepgram (speech to text): console.deepgram.com → API Keys, Member role."
+  store_secret DEEPGRAM_API_KEY   "Deepgram API key (hidden):"
+  say "ElevenLabs (the voice): elevenlabs.io → Developers → API Keys, text-to-speech only."
+  store_secret ELEVENLABS_API_KEY "ElevenLabs API key (hidden):"
+
+  say ""
+  say "Who may call: comma-separated Google emails. Empty lets nobody in (unlike"
+  say "the app's ALLOWED_EMAILS); '*' lets everyone the app lets in."
+  ask VOICE_ALLOWED_EMAILS "Voice allowlist:"
+  write_env VOICE_ALLOWED_EMAILS "$VOICE_ALLOWED_EMAILS"
+  [[ "$VOICE_ALLOWED_EMAILS" != *"|"* ]] || { warn "the allowlist can't contain '|'"; exit 1; }
+
+  if (( VOICE_READY )); then
+    say ""
+    say "The app mints call tokens, so it needs the LiveKit keys and the allowlist."
+    say "This makes a new revision of $RUN_SERVICE with the same image (no rebuild);"
+    say "the worker copies both from the app on every deploy."
+    if confirm "Turn voice on for the allowlist in $RUN_SERVICE now?"; then
+      gcloud run services update "$RUN_SERVICE" --region="$GCP_REGION" \
+        --update-secrets=LIVEKIT_URL=LIVEKIT_URL:latest,LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest,LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest \
+        --update-env-vars="^|^FINNIE_VOICE_ENABLED=1|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
+      if exists gcloud run worker-pools describe finnie-voice --region="$GCP_REGION"; then
+        # An allowlist change applies to calls at once, without waiting for a deploy.
+        gcloud run worker-pools update finnie-voice --region="$GCP_REGION" \
+          --update-env-vars="^|^FINNIE_VOICE_ENABLED=1|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
+      fi
+      VOICE=1
+      write_env VOICE 1
+    else
+      SKIPPED+=("voice: not turned on in $RUN_SERVICE (re-run this stage)")
+    fi
+  else
+    warn "Some keys are missing, so voice stays as it was. Re-run once you have them."
+  fi
+else
+  note "voice unchanged (VOICE=$VOICE)"
+fi
+pause
+
+# ── 8 ─────────────────────────────────────────────────────────────────────
 stage "Build and deploy"
-SUBMIT="gcloud builds submit --config cloudbuild.yaml --substitutions=_REGION=$GCP_REGION,_SERVICE=$RUN_SERVICE,_RUNTIME_SA=$RUNTIME_SA,_CLOUDSQL_INSTANCE=$SQL_CONNECTION ."
+SUBMIT="gcloud builds submit --config cloudbuild.yaml --substitutions=_REGION=$GCP_REGION,_SERVICE=$RUN_SERVICE,_RUNTIME_SA=$RUNTIME_SA,_CLOUDSQL_INSTANCE=$SQL_CONNECTION,_VOICE=$VOICE ."
+(( VOICE == 1 )) && say "With _VOICE=1 it also builds and deploys the voice worker (worker pool finnie-voice)."
 say "Every future deploy is this one command (also saved as DEPLOY_COMMAND):"
 note "$SUBMIT"
 write_env DEPLOY_COMMAND "$SUBMIT"

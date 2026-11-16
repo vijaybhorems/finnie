@@ -16,6 +16,8 @@ The worker, speech shaping and prefetch moved to `src/voice/` in the Safeguards 
 | `src/voice/speech.py` | Removes the written disclaimer and markdown, and releases whole sentences to TTS. Tested in `tests/test_voice_speech.py`. |
 | `src/voice/tokens.py` | The app's token minter: allowlist, 10 tokens an hour, daily minutes, mic-only one-room tokens, one call per user. Tested in `tests/test_voice_tokens.py`. |
 | `src/voice/limits.py` | Call length (20 min, warning at 18), idle prompt at 90 s and hang-up at 120 s, 60 turns, 30 min a day. Tested in `tests/test_voice_limits.py`. |
+| `src/voice/turns.py` | The securities line before answers about specific securities, slow-turn notice (8 s) and abandon (20 s), apologies for failed turns, speech-to-text stall detection. Tested in `tests/test_voice_turns.py`. |
+| `src/voice/health.py` | Deepgram and ElevenLabs circuit breakers shared through the cache (Redis). Tested in `tests/test_voice_health.py`. |
 | `local_token.py` | Local tools mint through `src/voice/tokens.py` as `g-local-<name>` with `VOICE_TEST_EMAIL` (default `tester@example.com`); `raw_call()` signs one directly to test refusals. |
 | `talk_page.py` | Local Streamlit page with Talk and End buttons and a live transcript. Mints mic-only, 10-minute tokens. |
 | `measure_turns.py` | Times Finnie's share of latency (classifier, first sentence, total) with no voice vendors involved. |
@@ -89,6 +91,13 @@ To check the idle limit (stays silent: "Are you still there?" after 90 s, hang-u
 ```
 
 The rate limit, daily minutes and voice-call records live in the user's store, which is per process without `DATABASE_URL`. To see them shared between the caller and the worker, give both the same `DATABASE_URL` (run `python -m src.persistence.migrate` on it first).
+
+To check failure handling, start the worker with one vendor's key broken (the caller keeps the real keys from `.env`), then run the scripted call:
+
+- `ELEVEN_API_KEY=x`: the call is spoken by the backup voice (Deepgram Aura).
+- `DEEPGRAM_API_KEY=x`: "I'm having trouble hearing you", and the call ends on the second stall.
+
+Breakers only see across calls with a shared Redis (`docker run -d --rm --name finnie-redis-test -p 6379:6379 redis:7`); `redis-cli get finnie:voice:health:deepgram` shows the count.
 
 To check the refusal path (one "Voice isn't available right now" line, then the call ends, nothing saved):
 

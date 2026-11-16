@@ -226,6 +226,7 @@ def _initial_state(
     conversation_history: list | None,
     user_profile: dict | None,
     channel: str = "chat",
+    interrupted_after: Optional[str] = None,
 ) -> FinnieState:
     from src.core.state import FinancialData
 
@@ -238,6 +239,7 @@ def _initial_state(
         user_profile=profile,
         financial_data=FinancialData(),
         channel=channel,
+        interrupted_after=interrupted_after,
     )
 
 
@@ -259,6 +261,7 @@ def _prepare_turn(
     user_id: Optional[str],
     thread_id: Optional[str],
     channel: str = "chat",
+    interrupted_after: Optional[str] = None,
 ) -> tuple[Any, Any, dict[str, Any], list]:
     """Pick the graph variant and build (graph, input, config, fallback_messages)."""
     configurable: dict[str, Any] = {}
@@ -276,11 +279,12 @@ def _prepare_turn(
             **turn_state_reset(),
             "user_profile": profile,
             "channel": channel,
+            "interrupted_after": interrupted_after,
             "messages": [HumanMessage(content=user_message)],
         }
         return build_graph(persistent=True), turn, {"configurable": configurable}, turn["messages"]
 
-    state = _initial_state(user_message, conversation_history, user_profile, channel)
+    state = _initial_state(user_message, conversation_history, user_profile, channel, interrupted_after)
     return build_graph(), state, {"configurable": configurable}, state.messages
 
 
@@ -323,6 +327,7 @@ def run_workflow(
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     channel: str = "chat",
+    interrupted_after: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Main entry point for running a single turn through the workflow.
@@ -340,7 +345,8 @@ def run_workflow(
     financial_data, rag_context, cache_hit, messages.
     """
     graph, turn, config, fallback = _prepare_turn(
-        user_message, conversation_history, user_profile, user_id, thread_id, channel
+        user_message, conversation_history, user_profile, user_id, thread_id, channel,
+        interrupted_after,
     )
     try:
         result = graph.invoke(turn, config)
@@ -358,6 +364,7 @@ def stream_workflow(
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     channel: str = "chat",
+    interrupted_after: Optional[str] = None,
 ) -> Iterator[str]:
     """Yield the answer as it is generated; fill `sink` with the full result.
 
@@ -368,7 +375,8 @@ def stream_workflow(
     is flushed once the graph finishes.
     """
     graph, turn, config, fallback = _prepare_turn(
-        user_message, conversation_history, user_profile, user_id, thread_id, channel
+        user_message, conversation_history, user_profile, user_id, thread_id, channel,
+        interrupted_after,
     )
     streamed: list[str] = []
     final_state: dict[str, Any] = {}

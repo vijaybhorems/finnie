@@ -381,17 +381,30 @@ class TestCrossUserIsolation:
             run_workflow("hi", thread_id="g-123:abc")
 
 
-def _voice_turn(user_id: str, thread_id: str, message: str) -> dict[str, Any]:
+def _voice_turn(user_id: str, thread_id: str, message: str, heard: str | None = None) -> dict[str, Any]:
     """A turn as the voice worker runs it."""
     from src.workflow.graph import stream_workflow
 
     sink: dict[str, Any] = {}
-    list(stream_workflow(message, sink=sink, user_id=user_id, thread_id=thread_id, channel="voice"))
+    list(stream_workflow(message, sink=sink, user_id=user_id, thread_id=thread_id, channel="voice",
+                         interrupted_after=heard))
     return sink
 
 
 class TestVoiceCalls:
     """A voice call is its own thread: it never replaces or reads the chat thread."""
+
+    def test_interruption_reaches_only_the_next_turn(self, agent):
+        from src.voice.access import new_voice_room
+
+        user = _new_user()
+        room = new_voice_room(user)
+        _voice_turn(user, room, "what is a roth")
+        _voice_turn(user, room, "no, traditional", heard="A Roth IRA is")
+        _voice_turn(user, room, "thanks")
+        assert [s.interrupted_after for s in agent.seen[-3:]] == [None, "A Roth IRA is", None]
+        # The saved answer stays whole: the history the agent sees is the full text.
+        assert agent.seen[-2].messages[1].content == "answer 1"
 
     def test_call_is_recorded_without_touching_the_chat_thread(self, backend):
         from src.voice.access import new_voice_room

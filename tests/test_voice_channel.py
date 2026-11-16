@@ -66,3 +66,35 @@ def test_persistent_turn_carries_the_channel():
 
     _, turn, _, _ = _prepare_turn("hi", None, None, "g-1", "g-1:abc", "voice")
     assert turn["channel"] == "voice"
+
+
+class TestInterruptedAfter:
+    """What the user heard before cutting in reaches the next turn's prompt, and only that turn."""
+
+    def test_note_goes_in_the_per_request_block_only(self):
+        state = _voice_state("No, I meant Roth")
+        state.interrupted_after = "A Roth IRA is funded with after-tax money, so"
+        shared, role, context = _finance_agent()._build_messages(state, "ctx")[0].content
+        assert "interrupted your last answer" in context["text"]
+        assert '"A Roth IRA is funded with after-tax money, so"' in context["text"]
+        chat_shared, chat_role, _ = _finance_agent()._build_messages(_state(), "ctx")[0].content
+        assert (shared, role) == (chat_shared, chat_role)
+
+    def test_long_heard_text_keeps_its_end(self):
+        state = _voice_state()
+        state.interrupted_after = "start " + "word " * 200 + "where they stopped"
+        context = _finance_agent()._build_messages(state, "")[0].content[2]["text"]
+        assert "where they stopped" in context and "start" not in context
+
+    def test_no_note_without_an_interruption(self):
+        blocks = _finance_agent()._build_messages(_voice_state(), "ctx")[0].content
+        assert all("interrupted" not in b["text"] for b in blocks)
+
+    def test_reset_each_turn_and_carried_by_the_turn_input(self):
+        from src.workflow.graph import _prepare_turn
+
+        assert turn_state_reset()["interrupted_after"] is None
+        _, turn, _, _ = _prepare_turn("hi", None, None, "g-1", "g-1:abc", "voice", "heard this")
+        assert turn["interrupted_after"] == "heard this"
+        _, state, _, _ = _prepare_turn("hi", None, None, None, None, "voice", "heard this")
+        assert state.interrupted_after == "heard this"

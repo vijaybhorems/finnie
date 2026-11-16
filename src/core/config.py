@@ -217,6 +217,24 @@ class VoiceConfig(BaseModel):
     idle_hangup_seconds: float = 120
     max_turns_per_call: int = 60
     daily_minutes_per_user: float = 30
+    # Turn taking. LiveKit's defaults to start; tune with simulated calls.
+    endpointing_min_delay: float = 0.5   # silence before a turn may end
+    endpointing_max_delay: float = 3.0   # longest wait for a mid-question pause
+    interruption_min_duration: float = 0.5  # shorter speech ("uh-huh") doesn't interrupt
+    interruption_min_words: int = 0
+    false_interruption_timeout: float = 2.0  # resume if the "interruption" had no words
+    # Failures (src/voice/turns.py, health.py).
+    stt_stall_seconds: float = 3.0     # speech with no transcript this long after it ends
+    stt_stalls_to_end: int = 2         # stalls in a row that end the call
+    # Failed vendor reconnects in a row before LiveKit closes the session on
+    # its own; high enough that the worker ends a broken call after saying why.
+    vendor_error_tolerance: int = 15
+    slow_turn_notice_seconds: float = 8
+    slow_turn_abandon_seconds: float = 20
+    # Backup voice from another vendor, used for the rest of a call once the
+    # main one fails, and alone while the ElevenLabs breaker is open.
+    tts_fallback_model: str = "aura-2-asteria-en"
+    tts_connect_timeout_seconds: float = 2.0
 
 
 class AppConfig(BaseModel):

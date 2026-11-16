@@ -36,8 +36,8 @@ _AGENT_LABELS = {
     "error": "⚠️ Error",
 }
 
-# Turns that must not be learned from: guardrail refusals and errors.
-_NO_MEMORY_AGENTS = {"out_of_scope", "error"}
+# Turns that must not be learned from: guardrail refusals, "stop"/"never mind", and errors.
+_NO_MEMORY_AGENTS = {"out_of_scope", "acknowledge", "error"}
 
 _QUICK_PROMPTS = [
     ("📐", "What is a P/E ratio?"),

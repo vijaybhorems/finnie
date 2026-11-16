@@ -128,8 +128,19 @@ class FinnieVoiceAgent(Agent):
         self._interim = ""
         self._spec_running = False
         self._spec_pending: str | None = None
-        self._spec_done: set[str] = set()
+        self._spec_done: set[tuple[str, str]] = set()
         self._last_warm = 0.0
+        # The previous turn, as the graph will read it from the thread: the
+        # question, and the answer once its run finished ("" until then, or if
+        # it failed). The classifier needs it for follow-ups ("And in twenty
+        # years?"), and the early verdict is reused only if the context matches.
+        self._prev_question = ""
+        self._prev_answer = ""
+
+    def _classify_context(self) -> str:
+        from src.workflow.classify import conversation_context
+
+        return conversation_context(self._prev_question, self._prev_answer)
 
     # ── While the user speaks ───────────────────────────────────────────────
 
@@ -166,18 +177,19 @@ class FinnieVoiceAgent(Agent):
             asyncio.ensure_future(self._speculate(so_far))
 
     async def _speculate(self, text: str) -> None:
-        from src.workflow.classify import _normalize, classify_query
+        from src.workflow.classify import _normalize, classify_query, is_acknowledgement
         from src.workflow.guardrail import _matches_blocklist
 
         self._spec_running = True
         try:
             while text:
-                key = _normalize(text)
-                if key not in self._spec_done and not _matches_blocklist(text):
-                    self._spec_done.add(key)
+                key, context = _normalize(text), self._classify_context()
+                if ((key, context) not in self._spec_done and not _matches_blocklist(text)
+                        and not is_acknowledgement(text)):
+                    self._spec_done.add((key, context))
                     logger.info("voice_speculative_classify", words=len(key.split()))
                     try:
-                        await asyncio.to_thread(classify_query, text, [self.tokens])
+                        await asyncio.to_thread(classify_query, text, [self.tokens], context)
                     except Exception:  # noqa: BLE001 — the turn classifies again and fails closed
                         pass
                 text, self._spec_pending = self._spec_pending or "", None
@@ -186,17 +198,17 @@ class FinnieVoiceAgent(Agent):
 
     # ── The turn ────────────────────────────────────────────────────────────
 
-    async def _preamble_for(self, question: str) -> list[str]:
+    async def _preamble_for(self, question: str, context: str) -> list[str]:
         """Lines to say before the answer: the filler, and the securities line."""
-        from src.workflow.classify import classify_query
+        from src.workflow.classify import classify_query, is_acknowledgement
         from src.workflow.guardrail import _matches_blocklist
 
-        if _matches_blocklist(question):
-            return []
+        if _matches_blocklist(question) or is_acknowledgement(question):
+            return []  # refused, or "Okay." from the graph without a classifier call
         try:
             # Usually instant: classified while the user was speaking. If not,
             # this is the turn's one classifier call; the graph reuses it.
-            verdict = await asyncio.to_thread(classify_query, question, [self.tokens])
+            verdict = await asyncio.to_thread(classify_query, question, [self.tokens], context)
         except Exception:  # noqa: BLE001 — the graph classifies again and fails closed
             return []
         return preamble(verdict, filler=FILLER)
@@ -226,7 +238,7 @@ class FinnieVoiceAgent(Agent):
         self.turn_no += 1
         turn_no = self.turn_no
         started = time.perf_counter()
-        lines = await self._preamble_for(question)
+        lines = await self._preamble_for(question, self._classify_context())
         verdict_s = round(time.perf_counter() - started, 3)
         for line in lines:
             yield line
@@ -241,6 +253,10 @@ class FinnieVoiceAgent(Agent):
         queue: asyncio.Queue = asyncio.Queue()
         sink: dict[str, Any] = {}
         timing = {"started": time.perf_counter()}
+
+        # From here the graph has this question in the thread: it is the next
+        # turn's previous question, with no answer until the run finishes.
+        self._prev_question, self._prev_answer = question, ""
 
         def produce() -> None:
             from src.workflow.graph import stream_workflow
@@ -257,6 +273,10 @@ class FinnieVoiceAgent(Agent):
                 sink.setdefault("agent_used", "error")
                 loop.call_soon_threadsafe(queue.put_nowait, "")
             finally:
+                # The answer the thread now holds (none if the run failed), unless
+                # a newer turn has started: it has its own previous question.
+                if self.turn_no == turn_no and sink.get("agent_used") != "error":
+                    self._prev_answer = sink.get("final_response") or ""
                 loop.call_soon_threadsafe(queue.put_nowait, END)
                 # The full written answer, for the page, even if the user cut the speech short.
                 answer = answer_event(turn_no, sink.get("agent_used"), sink.get("final_response"))
@@ -268,7 +288,7 @@ class FinnieVoiceAgent(Agent):
                 # learn from what they said, as the chat page does.
                 if should_remember(sink.get("agent_used"), confidence, voice):
                     self.memories.add(self.user_id, question, voice.memory_min_confidence)
-                elif sink.get("agent_used") not in (None, "out_of_scope", "error"):
+                elif sink.get("agent_used") not in (None, "out_of_scope", "acknowledge", "error"):
                     logger.info("voice_memory_skipped_low_confidence", confidence=confidence)
 
         # The graph is synchronous; run it beside the event loop. On interruption

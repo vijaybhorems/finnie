@@ -20,16 +20,18 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.core.state import AgentType, FinancialData, FinnieState, UserProfile
 
 LIVE_MODE = os.environ.get("FINNIE_EVAL_LIVE", "0") == "1"
 
 
-def _make_state(query: str) -> FinnieState:
+def _make_state(query: str, previous: tuple[str, str] | None = None) -> FinnieState:
+    """A turn's state; `previous` is (the user's last question, Finnie's answer)."""
+    history = [HumanMessage(content=previous[0]), AIMessage(content=previous[1])] if previous else []
     return FinnieState(
-        messages=[HumanMessage(content=query)],
+        messages=[*history, HumanMessage(content=query)],
         user_profile=UserProfile(),
         financial_data=FinancialData(),
     )
@@ -107,6 +109,61 @@ ROUTING_CASES = [
     ("How does an HSA work for investing?", AgentType.TAX_EDUCATION),
     ("What's the wash-sale rule?", AgentType.TAX_EDUCATION),
 ]
+
+# Follow-ups that only make sense after the previous turn: (the previous
+# question, the start of Finnie's answer), the follow-up, the expected agent.
+# A follow-up goes to the conversation's agent. The last two check that context
+# never overrides the query: an off-topic request stays refused, and a question
+# that stands on its own is routed on its own.
+FOLLOW_UP_CASES = [
+    (("If I invest $10,000 at 7% for 10 years, how much will I have?",
+      "At 7% a year, $10,000 grows to roughly $19,700 after ten years, assuming returns compound annually."),
+     "What's the exact dollar amount?", AgentType.GOAL_PLANNING),
+    (("How much do I need to retire at 55?",
+      "A common starting point is 25 times your expected annual spending, so $60,000 a year means about $1.5M."),
+     "What if I wait until 60?", AgentType.GOAL_PLANNING),
+    (("How does a Roth IRA work?",
+      "A Roth IRA is funded with after-tax dollars; qualified withdrawals in retirement are tax-free."),
+     "What about the income limits?", AgentType.TAX_EDUCATION),
+    (("What is Apple stock doing today?",
+      "Apple (AAPL) is trading at $228.40, up 1.2% today, near the top of its 52-week range."),
+     "And what's its RSI?", AgentType.MARKET_ANALYSIS),
+    (("Analyze my portfolio: AAPL 10 shares @ $150, MSFT 5 shares @ $300",
+      "Your portfolio is two large-cap tech stocks, so it is concentrated in one sector."),
+     "How could I make it less risky?", AgentType.PORTFOLIO),
+    (("What happened in the market today?",
+      "Stocks fell about 1% after the Fed signalled it may hold rates higher for longer."),
+     "Why did that spook investors?", AgentType.NEWS_SYNTHESIZER),
+    (("What is a P/E ratio?",
+      "The price-to-earnings ratio compares a company's share price with its earnings per share."),
+     "Can you give me an example?", AgentType.FINANCE_QA),
+    (("What is a P/E ratio?",
+      "The price-to-earnings ratio compares a company's share price with its earnings per share."),
+     "Now write me a poem about cats.", AgentType.OUT_OF_SCOPE),
+    (("How does a Roth IRA work?",
+      "A Roth IRA is funded with after-tax dollars; qualified withdrawals in retirement are tax-free."),
+     "What's the current price of NVDA?", AgentType.MARKET_ANALYSIS),
+    (("How does a Roth IRA work?",
+      "A Roth IRA is funded with after-tax dollars; qualified withdrawals in retirement are tax-free."),
+     "Is that true for everyone?", AgentType.TAX_EDUCATION),
+    (("If I invest $10,000 at 7% for 10 years, how much will I have?",
+      "At 7% a year, $10,000 grows to roughly $19,700 after ten years, assuming returns compound annually."),
+     "And in twenty years?", AgentType.GOAL_PLANNING),
+    (("What happened in the market today?",
+      "Stocks fell about 1% after the Fed signalled it may hold rates higher for longer."),
+     "Say that again, more simply.", AgentType.NEWS_SYNTHESIZER),
+]
+# Follow-ups naming a security only by reference: the verdict's tickers come from the conversation.
+FOLLOW_UP_TICKERS = [(FOLLOW_UP_CASES[3][0], FOLLOW_UP_CASES[3][1], "AAPL")]
+
+
+def _real_anthropic_key() -> str:
+    """tests/conftest.py replaces every key with a fake; live routing needs the real one."""
+    from pathlib import Path
+
+    from dotenv import dotenv_values
+
+    return dotenv_values(Path(__file__).resolve().parents[2] / ".env").get("ANTHROPIC_API_KEY") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +313,16 @@ class TestRouteLikeProduction:
 # ---------------------------------------------------------------------------
 # Live router tests (real Claude API)
 # ---------------------------------------------------------------------------
+@pytest.fixture
+def real_key(monkeypatch):
+    key = _real_anthropic_key()
+    if not key:
+        pytest.skip("live router evals need ANTHROPIC_API_KEY in .env")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", key)
+
+
 @pytest.mark.skipif(not LIVE_MODE, reason="Set FINNIE_EVAL_LIVE=1 for live router evals")
+@pytest.mark.usefixtures("real_key")
 class TestLiveRouterAccuracy:
     """Test router with real Claude API — the gold standard for routing accuracy."""
 
@@ -274,3 +340,24 @@ class TestLiveRouterAccuracy:
             f"expected {expected_agent.value}. "
             f"Reasoning: {result.get('router_reasoning', 'N/A')}"
         )
+
+    @pytest.mark.parametrize(
+        "previous,query,expected_agent",
+        FOLLOW_UP_CASES,
+        ids=[f"{a.value}:{q[:40]}" for _, q, a in FOLLOW_UP_CASES],
+    )
+    def test_live_follow_up_routing(self, previous, query, expected_agent):
+        result = route_like_production(_make_state(query, previous))
+
+        assert result["next_agent"] == expected_agent, (
+            f"LIVE ({routing_node_name()}): follow-up '{query}' after '{previous[0]}' routed to "
+            f"{result['next_agent'].value}, expected {expected_agent.value}. "
+            f"Reasoning: {result.get('router_reasoning', 'N/A')}"
+        )
+
+    @pytest.mark.parametrize("previous,query,ticker", FOLLOW_UP_TICKERS, ids=[q for _, q, _ in FOLLOW_UP_TICKERS])
+    def test_live_follow_up_tickers(self, previous, query, ticker):
+        if routing_node_name() != "classify":
+            pytest.skip("only the merged classifier resolves tickers")
+        result = route_like_production(_make_state(query, previous))
+        assert ticker in result.get("query_tickers", []), result

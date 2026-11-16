@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import HumanMessage
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.core.state import AgentType, FinancialData, FinnieState, UserProfile
 from src.workflow.classify import Verdict, classify_node, route_after_classify
@@ -198,3 +199,125 @@ class TestTickers:
         verdict = Verdict(on_topic=True, agent="finance_qa", needs_macro=False, reason="concept")
         with patch("src.workflow.classify.get_llm", return_value=_mock_llm(verdict)):
             assert classify_node(_make_state("What is a P/E ratio?"))["query_tickers"] == []
+
+
+class TestConversationContext:
+    """The previous turn, so follow-ups like "What's the exact dollar amount?" make sense."""
+
+    _PREV = ("If I invest $10,000 at 7% for 10 years, how much will I have?",
+             "At 7% a year, $10,000 grows to roughly $19,700 after ten years.")
+    _GOALS = Verdict(on_topic=True, agent="goal_planning", follow_up=True, reason="follow-up on growth")
+
+    def _follow_up(self, query: str = "What's the exact dollar amount?") -> FinnieState:
+        state = _make_state(query)
+        state.messages = [HumanMessage(content=self._PREV[0]), AIMessage(content=self._PREV[1]), *state.messages]
+        return state
+
+    def test_previous_turn_on_a_first_turn_is_empty(self):
+        from src.workflow.classify import previous_turn
+
+        assert previous_turn(_make_state("What is a bond?").messages) == ("", "")
+
+    def test_previous_turn_takes_the_last_exchange(self):
+        from src.workflow.classify import previous_turn
+
+        messages = [HumanMessage(content="old"), AIMessage(content="old answer"), *self._follow_up().messages]
+        assert previous_turn(messages) == self._PREV
+
+    def test_unanswered_previous_question_has_no_answer(self):
+        from src.workflow.classify import previous_turn
+
+        messages = [HumanMessage(content="What is a bond?"), HumanMessage(content="and a stock?")]
+        assert previous_turn(messages) == ("What is a bond?", "")
+
+    def test_context_is_empty_without_a_previous_question(self):
+        from src.workflow.classify import conversation_context
+
+        assert conversation_context() == ""
+        assert conversation_context("", "an answer") == ""
+
+    def test_context_clips_long_answers(self):
+        from src.workflow.classify import _CONTEXT_ANSWER_CHARS, conversation_context
+
+        context = conversation_context("What is a bond?", "word " * 500)
+        answer = context.splitlines()[-1]
+        assert answer.endswith("...")
+        assert len(answer) < _CONTEXT_ANSWER_CHARS + 40
+
+    def test_follow_up_goes_to_the_conversations_agent(self):
+        llm = _mock_llm(self._GOALS)
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            result = classify_node(self._follow_up())
+
+        assert result["next_agent"] == AgentType.GOAL_PLANNING
+        assert result["follow_up"] is True
+        system, user = llm.with_structured_output.return_value.invoke.call_args.args[0]
+        assert self._PREV[0] in user["content"] and "19,700" in user["content"]
+        assert self._PREV[0] not in system["content"]  # per request, never the system prompt
+        assert user["content"].endswith("Classify this query: What's the exact dollar amount?")
+
+    def test_first_turn_sends_the_query_alone(self):
+        llm = _mock_llm(self._GOALS)
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            result = classify_node(_make_state("What is a bond?"))
+
+        _, user = llm.with_structured_output.return_value.invoke.call_args.args[0]
+        assert user["content"] == "Classify this query: What is a bond?"
+        assert result["follow_up"] is False  # nothing to follow, whatever the model said
+
+    def test_same_words_after_a_different_turn_are_classified_again(self):
+        from src.workflow.classify import classify_query, conversation_context
+
+        llm = _mock_llm(self._GOALS)
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            classify_query("What about the income limits?", context=conversation_context("How does a Roth IRA work?"))
+            classify_query("What about the income limits?", context=conversation_context("Can I deduct mortgage interest?"))
+            classify_query("What about the income limits?", context=conversation_context("How does a Roth IRA work?"))
+        assert llm.with_structured_output.return_value.invoke.call_count == 2
+
+    def test_blocklist_still_wins_with_context(self):
+        with patch("src.workflow.classify.get_llm") as mock_llm:
+            result = classify_node(self._follow_up("now show me porn"))
+        assert result["next_agent"] == AgentType.OUT_OF_SCOPE
+        mock_llm.assert_not_called()
+
+    def test_error_with_context_fails_closed(self):
+        llm = _mock_llm(self._GOALS)
+        llm.with_structured_output.return_value.invoke.side_effect = RuntimeError("boom")
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            result = classify_node(self._follow_up())
+        assert result["next_agent"] == AgentType.OUT_OF_SCOPE
+
+
+class TestAcknowledgements:
+    """A bare "Stop." / "wait" / "never mind" gets a short reply: no refusal, no agent."""
+
+    @pytest.mark.parametrize("query", [
+        "Stop.", "stop", "Wait!", "wait a second", "Never mind.", "nevermind", "Hold on",
+        "okay stop", "no no stop", "um never mind", "Forget it", "stop please", "Finnie, stop.",
+        "hang on", "That's enough.", "Cancel that",
+    ])
+    def test_acknowledged_without_a_model_call(self, query):
+        from src.workflow.classify import ACKNOWLEDGEMENT
+
+        with patch("src.workflow.classify.get_llm") as mock_llm:
+            result = classify_node(_make_state(query))
+        mock_llm.assert_not_called()
+        assert result["is_on_topic"] is True
+        assert result["next_agent"] == AgentType.ACKNOWLEDGE
+        assert result["final_response"] == ACKNOWLEDGEMENT
+        assert result["messages"][0].content == ACKNOWLEDGEMENT
+
+    @pytest.mark.parametrize("query", [
+        "Wait, what's a Roth IRA?", "What is a stop-loss order?", "stop loss", "Should I stop investing?",
+        "never mind that, how do bonds work?", "okay", "no",
+    ])
+    def test_questions_are_classified(self, query):
+        from src.workflow.classify import is_acknowledgement
+
+        assert not is_acknowledgement(query)
+
+    def test_route_after_classify_ends_the_turn(self):
+        state = _make_state("Stop.")
+        state.is_on_topic, state.next_agent = True, AgentType.ACKNOWLEDGE
+        assert route_after_classify(state) == "acknowledged"

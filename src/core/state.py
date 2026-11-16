@@ -18,6 +18,8 @@ class AgentType(str, Enum):
     TAX_EDUCATION = "tax_education"
     ROUTER = "router"
     OUT_OF_SCOPE = "out_of_scope"
+    # A bare "stop" / "wait" / "never mind": a short acknowledgement, no agent.
+    ACKNOWLEDGE = "acknowledge"
 
 
 class UserProfile(BaseModel):
@@ -66,6 +68,11 @@ class FinnieState(BaseModel):
     # named in words ("Apple" -> AAPL). Empty on the legacy path; agents fall
     # back to finding symbols in the text.
     query_tickers: list[str] = Field(default_factory=list)
+
+    # True when the classifier needed the previous turn to understand this
+    # query ("What's the exact dollar amount?"). Such an answer is about this
+    # conversation, so the shared FAQ cache never stores it.
+    follow_up: bool = False
 
     # True when the response was served from the semantic FAQ cache (no LLM call).
     cache_hit: bool = False

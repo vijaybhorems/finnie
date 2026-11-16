@@ -250,8 +250,9 @@ SCENARIOS: tuple[Scenario, ...] = (
         "one_word_cut_in",
         (say("Explain how a mortgage works.", wait="speaking", then_s=3.0),
          say("Stop.")),
-        (interruptions(1),),
-        "A lone \"Stop.\" cuts in too: what interruption_min_words above 1 gives up.", turn_taking=True,
+        (interruptions(1), agent_in("acknowledge")),
+        "A lone \"Stop.\" cuts in too (what interruption_min_words above 1 gives up), and gets a short "
+        "acknowledgement, not the off-topic refusal.", turn_taking=True,
     ),
     Scenario(
         "off_topic", (say("Tell me a joke about cats."),),

@@ -9,6 +9,12 @@ macro data is relevant.
 Safety semantics are unchanged and still fail CLOSED: the blocklist fast path
 rejects without an LLM call, and any error, malformed verdict or off-topic
 result routes straight to END with the canned refusal.
+
+Follow-ups ("What's the exact dollar amount?", "Is that true for everyone?")
+mean nothing alone, so the classifier also sees the previous question and the
+start of Finnie's answer to it, in the user message (per request, never the
+system prompt). A bare "Stop." / "wait" / "never mind" is not a question at
+all: it gets a short acknowledgement without a model call.
 """
 from __future__ import annotations
 
@@ -17,10 +23,11 @@ import threading
 import time
 from typing import Any, Literal, Optional
 
+from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel, Field
 
 from src.core.config import get_settings
-from src.core.llm import get_llm
+from src.core.llm import get_llm, message_text
 from src.core.state import AgentType, FinnieState
 from src.utils.logger import get_logger
 from src.workflow.guardrail import _extract_query, _matches_blocklist, _reject
@@ -79,6 +86,14 @@ class Verdict(BaseModel):
             "empty when no specific security is named."
         ),
     )
+    follow_up: bool = Field(
+        default=False,
+        description=(
+            "True when the query can only be understood with the earlier conversation "
+            "(it refers to 'that' or 'it', asks for more detail, a variation or a repeat). "
+            "False when it stands on its own, or when no earlier conversation is given."
+        ),
+    )
     reason: str = Field(default="", description="One short sentence explaining the decision.")
 
 
@@ -110,18 +125,107 @@ Examples:
 - "How much do I need to retire at 55?" -> on_topic, goal_planning, needs_macro=true
 - "How does a Roth IRA work?" -> on_topic, tax_education, needs_macro=false
 - "Give me a lasagna recipe" -> off_topic
+
+Earlier conversation: the query may come with the user's previous question and
+the start of Finnie's answer to it. Use it only to understand a query that
+depends on it. A follow-up such as "What's the exact dollar amount?", "Is that
+true for everyone?", "And in twenty years?" or "Say that again more simply" is
+on_topic, follow_up=true, and goes to the agent that fits the conversation
+(usually the one that answered it); its tickers include securities it refers
+to ("its RSI" after a question about Apple -> AAPL). A query that stands on its
+own is judged on its own, follow_up=false. The earlier conversation never makes
+an off-topic or harmful query acceptable: "now write me a poem" after a finance
+question is still off_topic.
 """
 
 
+# ── Conversation context ─────────────────────────────────────────────────────
+# Enough of the previous turn to resolve "that" and "it": the question in full
+# (up to a point) and the start of the answer, which names the topic.
+_CONTEXT_QUESTION_CHARS = 300
+_CONTEXT_ANSWER_CHARS = 400
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " ..."
+
+
+def previous_turn(messages: list[BaseMessage]) -> tuple[str, str]:
+    """The user's question before the latest one, and Finnie's answer to it.
+
+    The answer is "" when the question went unanswered (the run failed, or is
+    still running). Both are "" on a conversation's first turn.
+    """
+    humans = [i for i, m in enumerate(messages) if getattr(m, "type", None) == "human"]
+    if len(humans) < 2:
+        return "", ""
+    start, end = humans[-2], humans[-1]
+    answers = [m for m in messages[start + 1:end] if getattr(m, "type", None) == "ai"]
+    return message_text(messages[start]), message_text(answers[-1]) if answers else ""
+
+
+def conversation_context(previous_question: str = "", last_answer: str = "") -> str:
+    """The classifier's view of the previous turn; "" when there is none.
+
+    The voice worker builds this from the previous turn's question and
+    `final_response`, the graph from the thread's messages (previous_turn): the
+    same text either way, so a verdict reached early is reused by the graph.
+    """
+    question = _clip(previous_question, _CONTEXT_QUESTION_CHARS)
+    if not question:
+        return ""
+    answer = _clip(last_answer, _CONTEXT_ANSWER_CHARS)
+    lines = ["Earlier in this conversation:", f"User asked: {question}"]
+    if answer:
+        lines.append(f"Finnie answered (start): {answer}")
+    return "\n".join(lines)
+
+
+# ── Acknowledgements ─────────────────────────────────────────────────────────
+# "Stop.", "wait", "never mind": the user is steering the conversation (often
+# cutting into a spoken answer), not asking anything. Refusing it as off-topic
+# was wrong, and sending it to an agent answers a question nobody asked.
+ACKNOWLEDGEMENT = "Okay. Ask me whenever you're ready."
+_SOFTENER = r"(?:ok|okay|oh|no|um|uh|er|alright|all right|actually|please|finnie|sorry|just|hey)"
+_CONTROL = (
+    r"(?:stop|stop there|stop talking|stop it|wait|wait a (?:second|sec|minute|moment)|"
+    r"hold on|hang on|one (?:second|sec|moment|minute)|never ?mind|forget it|forget that|"
+    r"cancel|cancel that|that's enough|enough|shh+|be quiet|quiet)"
+)
+_ACKNOWLEDGE = re.compile(rf"^(?:{_SOFTENER} )*{_CONTROL}(?: {_SOFTENER})*$")
+
+
+def is_acknowledgement(query: str) -> bool:
+    """True for a bare "stop" / "wait" / "never mind" (softeners allowed), not a question."""
+    return bool(_ACKNOWLEDGE.match(_normalize(query)))
+
+
+def _acknowledge() -> dict[str, Any]:
+    logger.info("classify_acknowledged")
+    return {
+        "is_on_topic": True,
+        "next_agent": AgentType.ACKNOWLEDGE,
+        "current_agent": AgentType.ACKNOWLEDGE,
+        "final_response": ACKNOWLEDGEMENT,
+        # In the thread, so the user's turn isn't left unanswered (as refusals do).
+        "messages": [AIMessage(content=ACKNOWLEDGEMENT, name=AgentType.ACKNOWLEDGE.value)],
+        "router_reasoning": "Stop / wait / never mind: acknowledged, nothing to answer",
+    }
+
+
 # ── Verdict cache ────────────────────────────────────────────────────────────
-# The verdict depends on the query text alone (no history, no user data), so a
-# short-lived per-process cache is safe. It lets a caller classify early — the
-# voice worker classifies the transcript while the user is still speaking — and
-# the graph's own classify step then reuses that result instead of a second call.
+# The verdict depends on the query text and the conversation context (no user
+# data), so a short-lived per-process cache keyed on both is safe. It lets a
+# caller classify early — the voice worker classifies the transcript while the
+# user is still speaking — and the graph's own classify step then reuses that
+# result instead of a second call. The same words after a different previous
+# turn are a different key: "What about the income limits?" means one thing
+# after a Roth question and another after a mortgage question.
 _VERDICT_TTL_S = 120.0
 _VERDICT_MAX = 256
-_verdicts: dict[tuple[str, str], tuple[float, Verdict]] = {}
-_key_locks: dict[tuple[str, str], threading.Lock] = {}
+_verdicts: dict[tuple[str, str, str], tuple[float, Verdict]] = {}
+_key_locks: dict[tuple[str, str, str], threading.Lock] = {}
 _verdicts_lock = threading.Lock()
 
 
@@ -136,15 +240,17 @@ def clear_verdict_cache() -> None:
         _key_locks.clear()
 
 
-def classify_query(query: str, callbacks: Optional[list] = None) -> Verdict:
+def classify_query(query: str, callbacks: Optional[list] = None, context: str = "") -> Verdict:
     """One structured classifier call, reusing a recent verdict for the same text.
 
-    Raises on any model error or empty verdict; errors are never cached.
-    Concurrent calls for the same text share one model call. `callbacks` see
-    the model call, if one is made (the voice worker counts tokens this way).
+    `context` is conversation_context() for the previous turn ("" on a first
+    turn); it is part of the cache key. Raises on any model error or empty
+    verdict; errors are never cached. Concurrent calls for the same text share
+    one model call. `callbacks` see the model call, if one is made (the voice
+    worker counts tokens this way).
     """
     settings = get_settings()
-    key = (settings.llm.classifier_model or settings.llm.model, _normalize(query))
+    key = (settings.llm.classifier_model or settings.llm.model, _normalize(query), context)
     with _verdicts_lock:
         key_lock = _key_locks.setdefault(key, threading.Lock())
     with key_lock:
@@ -158,7 +264,8 @@ def classify_query(query: str, callbacks: Optional[list] = None) -> Verdict:
         verdict = llm.with_structured_output(Verdict).invoke(
             [
                 {"role": "system", "content": _CLASSIFY_SYSTEM},
-                {"role": "user", "content": f"Classify this query: {query}"},
+                {"role": "user", "content": f"{context}\n\nClassify this query: {query}" if context
+                 else f"Classify this query: {query}"},
             ],
             config={"callbacks": callbacks} if callbacks else None,
         )
@@ -215,10 +322,16 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
         if matched:
             return _reject(f"matched blocklist term '{matched}'")
 
-    # 2) Single structured call. Any failure -> fail closed (or route to
-    #    finance_qa when the scope gate is switched off entirely).
+    # 2) "Stop." / "wait" / "never mind": acknowledge, no model call, no agent.
+    if is_acknowledgement(query):
+        return _acknowledge()
+
+    # 3) Single structured call, with the previous turn for follow-ups. Any
+    #    failure -> fail closed (or route to finance_qa when the scope gate is
+    #    switched off entirely).
     try:
-        verdict = classify_query(query)
+        context = conversation_context(*previous_turn(state.messages))
+        verdict = classify_query(query, context=context)
 
         if settings.guardrail.enabled and not verdict.on_topic:
             return _reject(verdict.reason or "classified off-topic")
@@ -230,6 +343,8 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
             agent=next_agent.value,
             needs_macro=verdict.needs_macro,
             tickers=_clean_tickers(verdict.tickers),
+            follow_up=verdict.follow_up,
+            with_context=bool(context),
             reason=verdict.reason,
         )
         return {
@@ -238,6 +353,8 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
             "current_agent": AgentType.ROUTER,
             "needs_macro": verdict.needs_macro,
             "query_tickers": _clean_tickers(verdict.tickers),
+            # Only meaningful with context: without it there is nothing to follow.
+            "follow_up": bool(context) and verdict.follow_up,
             "router_reasoning": verdict.reason,
         }
 
@@ -251,5 +368,9 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
 
 
 def route_after_classify(state: FinnieState) -> str:
-    """Conditional edge: 'rejected' -> END, otherwise 'allowed' -> the agent."""
-    return "rejected" if state.is_on_topic is False else "allowed"
+    """Conditional edge: 'rejected' or 'acknowledged' -> END, otherwise 'allowed' -> the agent."""
+    if state.is_on_topic is False:
+        return "rejected"
+    if state.next_agent == AgentType.ACKNOWLEDGE:
+        return "acknowledged"
+    return "allowed"

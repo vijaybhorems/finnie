@@ -23,8 +23,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Turns with nothing worth learning from: refused (off topic) or failed.
-_NOT_LEARNED_FROM = {"out_of_scope", "error"}
+# Turns with nothing worth learning from: refused (off topic), "stop"/"never mind", or failed.
+_NOT_LEARNED_FROM = {"out_of_scope", "acknowledge", "error"}
 
 
 def should_remember(agent_used: Optional[str], transcript_confidence: Optional[float], voice: Any) -> bool:

@@ -191,6 +191,17 @@ class TestCacheNodes:
         faq_cache_write_node(state)
         assert self.cache.get("How do current rates affect bonds?") is None
 
+    def test_never_writes_a_follow_up(self):
+        """'Can you give me an example?' is about this conversation, not a reusable answer."""
+        state = _state("Can you give me an example?")
+        state.next_agent = AgentType.FINANCE_QA
+        state.needs_macro = False
+        state.follow_up = True
+        state.final_response = "Say a stock trades at $50 and earns $5 a share..."
+
+        faq_cache_write_node(state)
+        assert self.cache.get("Can you give me an example?") is None
+
     def test_never_writes_on_the_legacy_path(self):
         """needs_macro=None means the agent fetched macro data unconditionally."""
         state = _state("What is a P/E ratio?")

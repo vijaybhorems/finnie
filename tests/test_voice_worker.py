@@ -40,7 +40,8 @@ class FakeSaves:
 def graph(monkeypatch):
     """Stub the graph and classifier; record what each turn was given."""
     state: dict[str, Any] = {"answer": "A P/E ratio compares price to earnings.", "agent": "finance_qa",
-                             "verdict_agent": "finance_qa", "tickers": [], "speak": False, "calls": []}
+                             "verdict_agent": "finance_qa", "tickers": [], "speak": False, "calls": [],
+                             "classified": []}
 
     def stream_workflow(question, sink=None, **kwargs):
         state["calls"].append({"question": question, **kwargs})
@@ -50,7 +51,8 @@ def graph(monkeypatch):
             yield " " + word
         sink["final_response"] = state["answer"]  # as stream_workflow fills it, for the page
 
-    def classify_query(question, callbacks=None):
+    def classify_query(question, callbacks=None, context=""):
+        state["classified"].append((question, context))
         return SimpleNamespace(on_topic=True, agent=state["verdict_agent"], tickers=state["tickers"])
 
     monkeypatch.setattr("src.workflow.graph.stream_workflow", stream_workflow)
@@ -90,6 +92,30 @@ async def test_every_turn_counts_its_tokens_on_the_calls_meter(graph):
     await _say("what is a p e ratio", agent)
     await _say("and a dividend", agent)
     assert [c["callbacks"] for c in graph["calls"]] == [[agent.tokens], [agent.tokens]]
+
+
+async def test_the_classifier_gets_the_previous_turn_as_the_graph_will(graph):
+    """The early verdict is reused only if its context matches the graph's (classify.previous_turn)."""
+    from src.workflow.classify import conversation_context
+
+    agent = _agent()
+    await _say("if i invest ten thousand dollars at seven percent how much will i have", agent)
+    graph["answer"] = "About nineteen thousand seven hundred."
+    await _say("whats the exact dollar amount", agent)
+    assert graph["classified"][0] == ("if i invest ten thousand dollars at seven percent how much will i have", "")
+    assert graph["classified"][1] == ("whats the exact dollar amount", conversation_context(
+        "if i invest ten thousand dollars at seven percent how much will i have",
+        "A P/E ratio compares price to earnings."))  # the first turn's final_response
+
+
+async def test_stop_skips_the_classifier_and_reaches_the_graph(graph):
+    graph.update(answer="Okay. Ask me whenever you're ready.", agent="acknowledge")
+    agent = _agent()
+    said = await _say("stop", agent)
+    assert graph["classified"] == []
+    assert graph["calls"][0]["question"] == "stop"
+    assert "Okay." in said
+    assert agent.memories.added == []
 
 
 async def test_spelled_out_terms_reach_the_graph_written(graph):

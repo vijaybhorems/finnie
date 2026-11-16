@@ -70,6 +70,72 @@ def mask_amounts(text: str) -> str:
     return _HEDGE.sub("", _RANGE.sub(AMOUNT_ON_SCREEN, text))
 
 
+# Said the way a listener expects (design doc, Evaluation layer 1). ElevenLabs
+# reads most text well; these are the forms it gets wrong or reads oddly.
+TICKER_NAMES = {
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "Nvidia", "AMZN": "Amazon",
+    "GOOGL": "Alphabet", "GOOG": "Alphabet", "META": "Meta", "TSLA": "Tesla",
+    "BRK.B": "Berkshire Hathaway", "BRK.A": "Berkshire Hathaway", "JPM": "JPMorgan",
+    "V": "Visa", "MA": "Mastercard", "JNJ": "Johnson and Johnson", "WMT": "Walmart",
+    "XOM": "Exxon", "UNH": "UnitedHealth", "HD": "Home Depot", "PG": "Procter and Gamble",
+    "KO": "Coca-Cola", "PEP": "PepsiCo", "COST": "Costco", "DIS": "Disney", "NFLX": "Netflix",
+    "AMD": "AMD", "INTC": "Intel", "BAC": "Bank of America", "AVGO": "Broadcom",
+    # Funds: their letters, which is how people say them.
+    "SPY": "S P Y", "QQQ": "triple Q", "VOO": "V O O", "VTI": "V T I", "DIA": "D I A",
+    "IWM": "I W M", "BND": "B N D", "AGG": "A G G",
+}
+# Single letters that are tickers only in a ticker-shaped spot: "(V)", "V shares".
+_SHORT_TICKERS = {t for t in TICKER_NAMES if len(t) <= 2}
+_ACCOUNTS = [
+    (re.compile(r"\b401\s?\(?k\)?(?=\W|$)", re.IGNORECASE), "four-oh-one-k"),
+    (re.compile(r"\b403\s?\(?b\)?(?=\W|$)", re.IGNORECASE), "four-oh-three-b"),
+    (re.compile(r"\b457\s?\(?b\)?(?=\W|$)", re.IGNORECASE), "four-fifty-seven-b"),
+    (re.compile(r"\b529(?=\s+(?:plans?|accounts?|savings))", re.IGNORECASE), "five-twenty-nine"),
+]
+_SUFFIX_AMOUNT = re.compile(rf"(?:US)?\$\s?({_NUM})\s?(k|K|m|M|mm|bn|B|b)\b")
+_SUFFIX_WORDS = {"k": "thousand", "m": "million", "mm": "million", "b": "billion", "bn": "billion"}
+_SYMBOLS = [
+    (re.compile(r"\bS&P\b"), "S and P"),
+    (re.compile(r"\bP/E\b"), "P E"),
+    (re.compile(r"\bvs\.?(?=\s)", re.IGNORECASE), "versus"),
+    (re.compile(r"\be\.g\.,?", re.IGNORECASE), "for example"),
+    (re.compile(r"\bi\.e\.,?", re.IGNORECASE), "that is"),
+    (re.compile(r"\bYoY\b"), "year over year"),
+    (re.compile(r"\bYTD\b"), "year to date"),
+    (re.compile(r"(?<=\d)\s?bps\b"), " basis points"),
+    (re.compile(r"~\s?(?=\d|\$)"), "about "),
+]
+# "Apple (AAPL)" -> "Apple": the name is already said.
+_NAME_THEN_TICKER = re.compile(r"\s*\((?:NASDAQ:|NYSE:)?\s*\$?([A-Z]{1,5}(?:\.[AB])?)\)")
+_TICKER = re.compile(r"(?<![\w$.])\$?([A-Z]{1,5}(?:\.[AB])?)(?!\w|\.\w)")
+
+
+def _ticker_name(match: re.Match) -> str:
+    symbol = match.group(1)
+    name = TICKER_NAMES.get(symbol)
+    if name is None or (symbol in _SHORT_TICKERS and not match.group(0).startswith("$")):
+        return match.group(0)
+    return name
+
+
+def normalize_for_speech(text: str) -> str:
+    """Rewrite forms text-to-speech reads badly: "$1.2M", "401(k)", AAPL, "S&P".
+
+    Runs after mask_amounts, so in discreet mode amounts are already gone.
+    One- and two-letter tickers (V, MA, KO) are only renamed with a "$" in
+    front, since bare they are usually ordinary words or initials.
+    """
+    text = _NAME_THEN_TICKER.sub(
+        lambda m: "" if m.group(1) in TICKER_NAMES else m.group(0), text,
+    )
+    text = _SUFFIX_AMOUNT.sub(
+        lambda m: f"{m.group(1)} {_SUFFIX_WORDS[m.group(2).lower()]} dollars", text,
+    )
+    for pattern, repl in (*_ACCOUNTS, *_SYMBOLS):
+        text = pattern.sub(repl, text)
+    return _TICKER.sub(_ticker_name, text)
+
+
 def strip_written_disclaimer(text: str) -> str:
     return _WRITTEN_DISCLAIMER.sub("", text)
 
@@ -91,11 +157,24 @@ class SpeechBuffer:
     """
 
     _BOUNDARY = re.compile(r"(\n|[.!?:;](?=\s))")
+    # The written disclaimer always ends the answer. When it arrives in
+    # pieces rather than as one chunk, stop at its first line: the rest is
+    # never spoken (the session-start line covers it).
+    _DISCLAIMER_START = re.compile(r"(?:^|\n)\s*(?:-{3,}\s*)?\*?\s*Disclaimer:", re.IGNORECASE)
 
     def __init__(self) -> None:
         self._pending = ""
+        self._done = False  # reached the written disclaimer
+
+    def _release(self, ready: str) -> str:
+        start = self._DISCLAIMER_START.search(ready)
+        if start is not None:
+            ready, self._done, self._pending = ready[: start.start()], True, ""
+        return for_speech(ready)
 
     def push(self, token: str) -> str:
+        if self._done:
+            return ""
         self._pending += token
         match = None
         for match in self._BOUNDARY.finditer(self._pending):
@@ -103,8 +182,10 @@ class SpeechBuffer:
         if match is None:
             return ""
         ready, self._pending = self._pending[: match.end()], self._pending[match.end():]
-        return for_speech(ready)
+        return self._release(ready)
 
     def flush(self) -> str:
+        if self._done:
+            return ""
         ready, self._pending = self._pending, ""
-        return for_speech(strip_written_disclaimer(ready))
+        return self._release(strip_written_disclaimer(ready))

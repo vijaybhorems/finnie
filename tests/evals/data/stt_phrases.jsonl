@@ -1,0 +1,71 @@
+{"id": "p001", "text": "How does a Roth IRA work?", "key_terms": ["roth ira"], "numbers": []}
+{"id": "p002", "text": "Should I convert my traditional IRA to a Roth?", "key_terms": ["ira", "roth"], "numbers": []}
+{"id": "p003", "text": "What's the Roth IRA income limit this year?", "key_terms": ["roth ira"], "numbers": []}
+{"id": "p004", "text": "My 401(k) match is 4%.", "say": "My four oh one k match is four percent.", "key_terms": ["401k"], "numbers": ["4"]}
+{"id": "p005", "text": "Can I roll my old 401(k) into an IRA?", "say": "Can I roll my old four oh one k into an IRA?", "key_terms": ["401k", "ira"], "numbers": []}
+{"id": "p006", "text": "What is the 401(k) contribution limit for 2025?", "say": "What is the four oh one k contribution limit for twenty twenty five?", "key_terms": ["401k"], "numbers": ["2025"]}
+{"id": "p007", "text": "I have a 403(b) through my school district.", "say": "I have a four oh three b through my school district.", "key_terms": ["403b"], "numbers": []}
+{"id": "p008", "text": "Is an HSA better than an FSA?", "say": "Is an H S A better than an F S A?", "key_terms": ["hsa"], "numbers": []}
+{"id": "p009", "text": "How do I invest money in my HSA?", "say": "How do I invest money in my H S A?", "key_terms": ["hsa"], "numbers": []}
+{"id": "p010", "text": "What is an ETF?", "say": "What is an E T F?", "key_terms": ["etf"], "numbers": []}
+{"id": "p011", "text": "Are index ETFs cheaper than mutual funds?", "say": "Are index E T Fs cheaper than mutual funds?", "key_terms": ["etf"], "numbers": []}
+{"id": "p012", "text": "Show me the RSI for Tesla.", "say": "Show me the R S I for Tesla.", "key_terms": ["rsi", "tesla"], "numbers": []}
+{"id": "p013", "text": "Is Apple's RSI above 70?", "say": "Is Apple's R S I above seventy?", "key_terms": ["rsi", "apple"], "numbers": ["70"]}
+{"id": "p014", "text": "What does the MACD say about Nvidia?", "say": "What does the MAC D say about Nvidia?", "key_terms": ["macd", "nvidia"], "numbers": []}
+{"id": "p015", "text": "What is a P/E ratio?", "say": "What is a P E ratio?", "key_terms": ["pe ratio"], "numbers": []}
+{"id": "p016", "text": "Is a P/E of 30 too high?", "say": "Is a P E of thirty too high?", "key_terms": ["pe"], "numbers": ["30"]}
+{"id": "p017", "text": "How is the S&P 500 doing today?", "say": "How is the S and P five hundred doing today?", "key_terms": ["s and p 500"], "numbers": ["500"]}
+{"id": "p018", "text": "Did the Nasdaq close higher?", "key_terms": ["nasdaq"], "numbers": []}
+{"id": "p019", "text": "What moved the Dow Jones this week?", "key_terms": ["dow jones"], "numbers": []}
+{"id": "p020", "text": "How are dividend stocks taxed?", "key_terms": ["dividend"], "numbers": []}
+{"id": "p021", "text": "Explain capital gains tax on stocks.", "key_terms": ["capital gains"], "numbers": []}
+{"id": "p022", "text": "Should I do tax-loss harvesting this year?", "say": "Should I do tax loss harvesting this year?", "key_terms": ["tax loss harvesting"], "numbers": []}
+{"id": "p023", "text": "What is the wash sale rule?", "key_terms": ["wash sale"], "numbers": []}
+{"id": "p024", "text": "What is the FIRE movement?", "say": "What is the fire movement?", "key_terms": ["fire"], "numbers": []}
+{"id": "p025", "text": "Hey Finnie, what's the market doing?", "key_terms": ["finnie"], "numbers": []}
+{"id": "p026", "text": "What is Apple stock doing today?", "key_terms": ["apple"], "numbers": []}
+{"id": "p027", "text": "How is Microsoft doing this week?", "key_terms": ["microsoft"], "numbers": []}
+{"id": "p028", "text": "What's the current price of Nvidia?", "key_terms": ["nvidia"], "numbers": []}
+{"id": "p029", "text": "Any news on Amazon earnings?", "key_terms": ["amazon"], "numbers": []}
+{"id": "p030", "text": "Is Berkshire Hathaway a good long-term hold?", "say": "Is Berkshire Hathaway a good long term hold?", "key_terms": ["berkshire hathaway"], "numbers": []}
+{"id": "p031", "text": "What did the Fed decide on interest rates?", "key_terms": ["fed"], "numbers": []}
+{"id": "p032", "text": "How does inflation affect bonds?", "key_terms": ["inflation", "bonds"], "numbers": []}
+{"id": "p033", "text": "What's the yield on the ten-year Treasury?", "say": "What's the yield on the ten year treasury?", "key_terms": ["treasury"], "numbers": ["10"]}
+{"id": "p034", "text": "Explain dollar-cost averaging.", "say": "Explain dollar cost averaging.", "key_terms": ["dollar cost averaging"], "numbers": []}
+{"id": "p035", "text": "What is an expense ratio?", "key_terms": ["expense ratio"], "numbers": []}
+{"id": "p036", "text": "How diversified is my portfolio?", "key_terms": ["diversified", "portfolio"], "numbers": []}
+{"id": "p037", "text": "What's the beta of my holdings?", "key_terms": ["beta"], "numbers": []}
+{"id": "p038", "text": "I have 50 shares of Apple at 150 dollars.", "say": "I have fifty shares of Apple at a hundred fifty dollars.", "key_terms": ["apple"], "numbers": ["50", "150"]}
+{"id": "p039", "text": "I bought 20 shares of Microsoft at 300.", "say": "I bought twenty shares of Microsoft at three hundred.", "key_terms": ["microsoft"], "numbers": ["20", "300"]}
+{"id": "p040", "text": "I'm saving $2,000 a month for retirement.", "say": "I'm saving two thousand dollars a month for retirement.", "key_terms": [], "numbers": ["2000"]}
+{"id": "p041", "text": "Can I save $100,000 in five years?", "say": "Can I save a hundred thousand dollars in five years?", "key_terms": [], "numbers": ["100000"]}
+{"id": "p042", "text": "I want to retire at 55.", "say": "I want to retire at fifty five.", "key_terms": [], "numbers": ["55"]}
+{"id": "p043", "text": "I'm 34 and saving for a house.", "say": "I'm thirty four and saving for a house.", "key_terms": [], "numbers": ["34"]}
+{"id": "p044", "text": "We want to buy a house in 2028.", "say": "We want to buy a house in twenty twenty eight.", "key_terms": [], "numbers": ["2028"]}
+{"id": "p045", "text": "My salary is $85,000 a year.", "say": "My salary is eighty five thousand dollars a year.", "key_terms": [], "numbers": ["85000"]}
+{"id": "p046", "text": "What if I earn 7% a year for 20 years?", "say": "What if I earn seven percent a year for twenty years?", "key_terms": [], "numbers": ["7", "20"]}
+{"id": "p047", "text": "I put $6,500 in my Roth last year.", "say": "I put six thousand five hundred dollars in my Roth last year.", "key_terms": ["roth"], "numbers": ["6500"]}
+{"id": "p048", "text": "My emergency fund covers six months.", "key_terms": ["emergency fund"], "numbers": []}
+{"id": "p049", "text": "I have $15,000 in credit card debt.", "say": "I have fifteen thousand dollars in credit card debt.", "key_terms": [], "numbers": ["15000"]}
+{"id": "p050", "text": "Is a 4% withdrawal rate safe?", "say": "Is a four percent withdrawal rate safe?", "key_terms": ["withdrawal rate"], "numbers": ["4"]}
+{"id": "p051", "text": "How much do I need to retire with $1.5 million?", "say": "How much do I need to retire with one point five million dollars?", "key_terms": [], "numbers": ["1.5"]}
+{"id": "p052", "text": "Should I pay off my mortgage early?", "key_terms": ["mortgage"], "numbers": []}
+{"id": "p053", "text": "What's the difference between stocks and bonds?", "key_terms": ["stocks", "bonds"], "numbers": []}
+{"id": "p054", "text": "Explain compound interest to me.", "key_terms": ["compound interest"], "numbers": []}
+{"id": "p055", "text": "What are the latest earnings reports?", "key_terms": ["earnings"], "numbers": []}
+{"id": "p056", "text": "Tell me about recent SEC filings.", "say": "Tell me about recent S E C filings.", "key_terms": ["sec"], "numbers": []}
+{"id": "p057", "text": "Is there a golden cross on the S&P 500?", "say": "Is there a golden cross on the S and P five hundred?", "key_terms": ["golden cross"], "numbers": ["500"]}
+{"id": "p058", "text": "How is the energy sector doing today?", "key_terms": ["energy sector"], "numbers": []}
+{"id": "p059", "text": "What is a 529 plan?", "say": "What is a five twenty nine plan?", "key_terms": ["529"], "numbers": ["529"]}
+{"id": "p060", "text": "Can I use a 529 for private school?", "say": "Can I use a five twenty nine for private school?", "key_terms": ["529"], "numbers": ["529"]}
+{"id": "p061", "text": "What are required minimum distributions?", "key_terms": ["required minimum distributions"], "numbers": []}
+{"id": "p062", "text": "Is a high-yield savings account worth it?", "say": "Is a high yield savings account worth it?", "key_terms": ["high yield savings"], "numbers": []}
+{"id": "p063", "text": "What's a CD ladder?", "say": "What's a C D ladder?", "key_terms": ["cd ladder"], "numbers": []}
+{"id": "p064", "text": "Should I buy I bonds?", "say": "Should I buy I bonds?", "key_terms": ["i bonds"], "numbers": []}
+{"id": "p065", "text": "How do REITs pay dividends?", "say": "How do reets pay dividends?", "key_terms": ["reit", "dividends"], "numbers": []}
+{"id": "p066", "text": "What is an annuity?", "key_terms": ["annuity"], "numbers": []}
+{"id": "p067", "text": "How does Social Security work?", "key_terms": ["social security"], "numbers": []}
+{"id": "p068", "text": "Is now a good time to refinance?", "key_terms": ["refinance"], "numbers": []}
+{"id": "p069", "text": "What's the standard deduction for 2025?", "say": "What's the standard deduction for twenty twenty five?", "key_terms": ["standard deduction"], "numbers": ["2025"]}
+{"id": "p070", "text": "Um, so, like, how do I start investing?", "key_terms": ["investing"], "numbers": []}
+{"id": "p071", "text": "No wait, I meant the traditional one.", "key_terms": ["traditional"], "numbers": []}

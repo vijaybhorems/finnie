@@ -9,7 +9,8 @@ Pure (no LiveKit), so CI tests it. The worker wires it to LiveKit events.
   slow-turn notice at `slow_turn_notice_seconds`, an apology and a stop at
   `slow_turn_abandon_seconds` with no first token, and an apology if the
   graph fails. With `discreet=True` (the default for voice) dollar figures
-  are masked (`speech.mask_amounts`).
+  are masked (`speech.mask_amounts`); tickers, "401(k)" and the like are
+  rewritten to be said well (`speech.normalize_for_speech`).
 - `StallWatch`: notices speech-to-text going quiet (the user spoke, nothing
   was transcribed) and says when to warn and when to end the call.
 - `heard_answer()`: what the user heard of an answer, minus the preamble, for
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from src.voice.prefetch import FILLERS
-from src.voice.speech import SpeechBuffer, mask_amounts, strip_written_disclaimer
+from src.voice.speech import SpeechBuffer, mask_amounts, normalize_for_speech, strip_written_disclaimer
 
 SECURITIES_LINE = "This isn't a recommendation to buy or sell."
 SLOW_NOTICE = "This is taking longer than usual."
@@ -97,7 +98,9 @@ async def spoken_answer(
     final token (its error text), which is never spoken. `discreet` masks
     dollar figures in the answer.
     """
-    shape = mask_amounts if discreet else (lambda text: text)
+    def shape(text: str) -> str:
+        return normalize_for_speech(mask_amounts(text) if discreet else text)
+
     start = clock()
     buffer = SpeechBuffer()
     noticed = False

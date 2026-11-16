@@ -117,6 +117,25 @@ To measure Finnie alone (main venv, real Anthropic key, a few cents):
 .venv/bin/python -m spike.voice.measure_turns --repeats 2
 ```
 
+## Speech-to-text accuracy
+
+`tests/evals/test_stt_evals.py` (`FINNIE_EVAL_AUDIO=1`): 71 finance phrases × 6 takes (US, UK, Australian and Indian `say` voices, a fast take, pink noise), through Deepgram with the worker's options.
+
+| Run (2026-11-15, nova-3) | WER | Key terms | Numbers |
+|---|---:|---:|---:|
+| Before: original key terms | 0.071 | 0.887 | 0.853 |
+| After: 5 more key terms + `clean_transcript()` | 0.027 | 0.991 | 0.968 |
+
+What it found: account names come back spelled out even with key terms ("four zero one k", "five twenty nine", "S and P five hundred"), now rewritten by `clean_transcript()`; "REIT", "I bonds", "CD ladder" and "Berkshire Hathaway" were misheard until added as key terms. Left: "a P/E of thirty too high" is heard as "a PE of 32 high", and 2 of 71 noisy clips came back empty.
+
+## Latency by step
+
+```bash
+python scripts/voice_latency.py spike/voice/runs/turns.jsonl
+```
+
+Prints p50/p95 per step (turn decision, transcript, classifier, first token, first sentence, speech first byte, first audio) by turn type. It also reads the worker's structured `voice_turn` log lines, which carry timings only.
+
 ## Spike checklist (design doc gate)
 
 - [x] Worker registers with LiveKit and jobs are dispatched to it

@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.voice.speech import AMOUNT_ON_SCREEN, SpeechBuffer, for_speech, mask_amounts, strip_written_disclaimer
+from src.voice.speech import (
+    AMOUNT_ON_SCREEN,
+    SpeechBuffer,
+    for_speech,
+    mask_amounts,
+    normalize_for_speech,
+    strip_written_disclaimer,
+)
 from src.agents.base_agent import _DISCLAIMER
 
 
@@ -75,3 +82,47 @@ class TestMaskAmounts:
 
     def test_no_rounding_words_before_a_hidden_figure(self):
         assert mask_amounts("Save about $2,000 a month.") == f"Save {AMOUNT_ON_SCREEN} a month."
+
+
+class TestNormalizeForSpeech:
+    """Forms text-to-speech reads badly, rewritten (design doc: "$1.2M", "401(k)", AAPL)."""
+
+    @pytest.mark.parametrize("text,spoken", [
+        ("$1.2M", "1.2 million dollars"),
+        ("$40k a year", "40 thousand dollars a year"),
+        ("$3bn", "3 billion dollars"),
+        ("401(k)", "four-oh-one-k"),
+        ("a 401k and a 403(b)", "a four-oh-one-k and a four-oh-three-b"),
+        ("a 529 plan", "a five-twenty-nine plan"),
+        ("AAPL rose", "Apple rose"),
+        ("I like NVDA.", "I like Nvidia."),
+        ("Apple (AAPL) beat estimates", "Apple beat estimates"),
+        ("BRK.B is up", "Berkshire Hathaway is up"),
+        ("SPY versus QQQ", "S P Y versus triple Q"),
+        ("The S&P 500 P/E is ~22", "The S and P 500 P E is about 22"),
+        ("up 25 bps YoY", "up 25 basis points year over year"),
+        ("index funds, e.g. VTI", "index funds, for example V T I"),
+    ])
+    def test_rewrites(self, text, spoken):
+        assert normalize_for_speech(text) == spoken
+
+    @pytest.mark.parametrize("text", [
+        "V shares and MA too",          # one- and two-letter tickers need a $ to count
+        "A Roth IRA, an HSA and an ETF.",
+        "The U.S. economy grew 2%.",
+        "Saving $2,000 a month.",        # plain amounts read fine already
+        "Unknown XYZW stays as it is.",
+    ])
+    def test_leaves_alone(self, text):
+        assert normalize_for_speech(text) == text
+
+    def test_short_tickers_with_a_dollar_sign(self):
+        assert normalize_for_speech("Visa ($V) and $MA.") == "Visa and Mastercard."
+
+
+def test_disclaimer_split_across_tokens_is_not_spoken():
+    buffer = SpeechBuffer()
+    answer = "Apple is up today." + _DISCLAIMER
+    out = [buffer.push(answer[i:i + 5]) for i in range(0, len(answer), 5)] + [buffer.flush()]
+    spoken = " ".join(o for o in out if o.strip())
+    assert spoken.strip() == "Apple is up today."

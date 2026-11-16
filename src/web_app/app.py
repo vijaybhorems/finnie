@@ -64,6 +64,8 @@ warmup.wait_for_tracing()
 from src.persistence.user_data import DEFAULT_PROFILE  # noqa: E402
 from src.web_app.memory_panel import render_memory_panel  # noqa: E402
 from src.web_app.session import current_user_data, persisted, save_if_changed  # noqa: E402
+from src.web_app.voice import active_call_room, voice_offered  # noqa: E402
+from src.web_app.voice_panel import render_voice_panel  # noqa: E402
 
 # ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -158,6 +160,8 @@ def render_sidebar() -> str:
         )
 
         render_memory_panel(user_data)
+        if voice_offered():
+            render_voice_panel(user_data, active_call_room())
 
         st.markdown(
             '<div class="fn-fineprint">Finnie provides financial education, not '

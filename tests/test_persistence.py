@@ -374,6 +374,16 @@ class TestCrossUserIsolation:
         assert [m.content for m in agent.seen[-1].messages] == ["bob spoke"]
         assert [c["thread_id"] for c in _user_data(alice).voice_calls()] == [alice_room]
 
+        # Nor can he delete her call, its record or its transcript (the sidebar's delete).
+        from src.workflow.graph import delete_conversation, load_conversation
+
+        with pytest.raises(ValueError):
+            bob_data.delete_voice_call(alice_room)
+        with pytest.raises(ValueError):
+            delete_conversation(bob, alice_room)
+        assert [c["thread_id"] for c in _user_data(alice).voice_calls()] == [alice_room]
+        assert len(load_conversation(alice, alice_room)) == 2
+
     def test_thread_without_user_is_refused(self, agent):
         from src.workflow.graph import run_workflow
 
@@ -455,6 +465,32 @@ class TestVoiceCalls:
         data.set_speak_amounts(False, room)  # this call only
         assert data.speak_amounts(room) is False and data.speak_amounts() is True
         assert data.voice_calls()[0]["thread_id"] == room  # the call record is kept
+
+    def test_deleting_a_call_removes_its_record_and_transcript(self, agent):
+        from src.voice.access import new_voice_room
+        from src.web_app.voice_panel import _delete_call
+        from src.workflow.graph import load_conversation
+
+        user = _new_user()
+        data = _user_data(user)
+        kept, deleted = new_voice_room(user), new_voice_room(user)
+        for room in (kept, deleted):
+            data.start_voice_call(room)
+            _voice_turn(user, room, "what is a roth")
+
+        _delete_call(data, deleted)
+
+        assert [c["thread_id"] for c in data.voice_calls()] == [kept]
+        assert load_conversation(user, deleted) == []
+        assert len(load_conversation(user, kept)) == 2
+
+    def test_consent_is_remembered_per_user(self, backend):
+        alice, bob = _user_data(_new_user()), _user_data(_new_user())
+        alice.set_speak_amounts(True)  # other settings survive the consent being saved
+        assert alice.voice_consented() is False
+        alice.set_voice_consent()
+        assert alice.voice_consented() is True and alice.speak_amounts() is True
+        assert bob.voice_consented() is False
 
     def test_speak_amounts_switch_is_per_user(self, backend):
         from src.voice.access import new_voice_room

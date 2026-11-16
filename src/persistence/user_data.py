@@ -250,6 +250,20 @@ class UserData:
         calls = [item.value for item in items if self.owns_thread(item.value.get("thread_id", ""))]
         return sorted(calls, key=lambda c: c.get("started_at", ""), reverse=True)
 
+    def delete_voice_call(self, thread_id: str) -> None:
+        """Forget a call's record. Its transcript is the thread: delete it with delete_conversation()."""
+        if not self.owns_thread(thread_id):
+            raise ValueError("voice call thread does not belong to this user")
+        self._store.delete(self._voice_namespace, thread_id)
+
+    def voice_consented(self) -> bool:
+        """Whether the user has seen and accepted the voice privacy notice."""
+        return bool((self._get("settings") or {}).get("voice_consent_at"))
+
+    def set_voice_consent(self) -> None:
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self._put("settings", {**(self._get("settings") or {}), "voice_consent_at": stamp})
+
     # ── Memories ─────────────────────────────────────────────────────────────
 
     @property

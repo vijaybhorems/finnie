@@ -1,0 +1,114 @@
+/* Inherits the app theme through Streamlit's CSS variables (shadow root). */
+.fv-call {
+  font-family: var(--st-font, inherit);
+  color: var(--st-text-color, #0f1b2d);
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  container-type: inline-size;
+  /* Tall enough to put the call bar at the bottom of the screen; the bar is sticky
+     within this box, so it stays there as the log grows. 12rem: header and padding. */
+  min-height: calc(100dvh - 12rem);
+}
+.fv-log { display: flex; flex-direction: column; gap: .75rem; flex: 1; }
+.fv-log > * { scroll-margin-bottom: 6rem; } /* clear of the sticky call bar */
+.fv-user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: .55rem .85rem;
+  border-radius: 1rem 1rem .25rem 1rem;
+  background: var(--st-secondary-background-color, #eef2f7);
+  line-height: 1.5;
+}
+.fv-user.fv-interim { opacity: .6; font-style: italic; }
+.fv-card {
+  max-width: 95%;
+  padding: .75rem 1rem;
+  border-radius: 1rem 1rem 1rem .25rem;
+  border: 1px solid color-mix(in srgb, var(--st-text-color, #0f1b2d) 12%, transparent);
+  line-height: 1.6;
+}
+.fv-opening { border-style: dashed; color: color-mix(in srgb, var(--st-text-color, #0f1b2d) 70%, transparent); }
+.fv-answer p { margin: 0 0 .5rem; }
+.fv-answer p:last-child { margin-bottom: 0; }
+.fv-answer .fv-h { font-weight: 600; }
+.fv-answer ul, .fv-answer ol { margin: 0 0 .5rem 1.25rem; padding: 0; }
+.fv-answer table { border-collapse: collapse; margin: .25rem 0 .5rem; font-size: .92em; }
+.fv-answer th, .fv-answer td { border-bottom: 1px solid color-mix(in srgb, var(--st-text-color, #0f1b2d) 12%, transparent); padding: .25rem .6rem; text-align: left; }
+.fv-answer hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--st-text-color, #0f1b2d) 15%, transparent); margin: .6rem 0; }
+.fv-answer code { font-size: .9em; }
+.fv-meta:empty, .fv-said:empty { display: none; }
+.fv-meta { margin-top: .4rem; }
+.fv-said {
+  margin-top: .5rem;
+  padding-top: .45rem;
+  border-top: 1px dashed color-mix(in srgb, var(--st-text-color, #0f1b2d) 15%, transparent);
+  font-size: .9em;
+  color: color-mix(in srgb, var(--st-text-color, #0f1b2d) 70%, transparent);
+}
+.fv-said-label { font-weight: 600; margin-right: .25rem; }
+.fv-chip {
+  display: inline-block;
+  font-size: .78em;
+  padding: .1rem .55rem;
+  border-radius: 999px;
+  background: var(--st-secondary-background-color, #eef2f7);
+}
+.fv-interrupted { background: color-mix(in srgb, #d97706 18%, transparent); }
+.fv-notice {
+  padding: .5rem .8rem;
+  border-radius: .6rem;
+  background: color-mix(in srgb, #d97706 14%, transparent);
+  font-size: .92em;
+}
+.fv-notice[hidden] { display: none; }
+.fv-bar {
+  position: sticky;
+  bottom: .75rem;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem .9rem;
+  padding: .6rem .8rem;
+  border-radius: 1rem;
+  background: var(--st-background-color, #fff);
+  box-shadow: 0 8px 28px rgba(15, 27, 45, .12);
+  border: 1px solid color-mix(in srgb, var(--st-text-color, #0f1b2d) 10%, transparent);
+}
+.fv-status { display: flex; align-items: center; gap: .45rem; font-weight: 600; min-width: 7.5rem; }
+.fv-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #94a3b8; }
+.fv-dot[data-state="listening"] { background: #16a34a; }
+.fv-dot[data-state="thinking"] { background: #d97706; animation: fv-pulse 1s infinite; }
+.fv-dot[data-state="speaking"] { background: var(--st-primary-color, #2563eb); animation: fv-pulse 1.4s infinite; }
+.fv-dot[data-state="paused"], .fv-dot[data-state="ended"] { background: #94a3b8; }
+@keyframes fv-pulse { 50% { opacity: .35; } }
+.fv-meter { flex: 1 1 4rem; min-width: 3rem; height: .4rem; border-radius: 999px; background: var(--st-secondary-background-color, #eef2f7); overflow: hidden; }
+.fv-meter-fill { height: 100%; width: 0; background: #16a34a; transition: width 80ms linear; }
+.fv-timer { font-variant-numeric: tabular-nums; min-width: 2.6rem; }
+.fv-speak { display: flex; align-items: center; gap: .35rem; cursor: pointer; font-size: .92em; }
+.fv-bar button {
+  font: inherit;
+  padding: .35rem .9rem;
+  border-radius: .6rem;
+  border: 1px solid color-mix(in srgb, var(--st-text-color, #0f1b2d) 18%, transparent);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.fv-bar button[hidden] { display: none; }
+.fv-bar .fv-end { background: #dc2626; border-color: #dc2626; color: #fff; }
+.fv-bar .fv-mute[aria-pressed="true"] { background: var(--st-secondary-background-color, #eef2f7); }
+/* Narrow (a phone, or a window with the sidebar open): keep the controls on one line. */
+@container (max-width: 560px) {
+  .fv-meter { display: none; }
+  .fv-status { min-width: 6.5rem; }
+  .fv-bar { gap: .5rem .7rem; }
+}
+/* Phones: the bar runs along the bottom edge. */
+@media (max-width: 640px) {
+  .fv-bar { bottom: 0; border-radius: 1rem 1rem 0 0; margin: 0 -1rem; }
+  .fv-status { min-width: 0; }
+  /* Mute and End share a second row as wide buttons, easy to hit with a thumb. */
+  .fv-bar button { flex: 1 1 40%; padding: .55rem .9rem; }
+}

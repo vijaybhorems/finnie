@@ -1,12 +1,12 @@
 """Tokens for the local test tools (talk page, scripted caller). LOCAL USE ONLY.
 
-They pass the worker's join checks (src/voice/access.py) as a made-up Google
-user: identity g-local-<name>, a room named after it, and VOICE_TEST_EMAIL in
-the metadata. Start the worker with voice on and that email allowed:
+`new_call()` goes through the app's own minter (src/voice/tokens.py: rate
+limit, daily minutes, one call per user) as a made-up Google user g-local-<name>
+with VOICE_TEST_EMAIL. `raw_call()` signs a token directly, skipping the
+minter, to check that the worker refuses what the minter would not have issued.
+Start the worker with voice on and that email allowed:
     FINNIE_VOICE_ENABLED=1 FINNIE_VOICE_ALLOWED_EMAILS=tester@example.com \
         .venv-voice/bin/python -m src.voice.worker dev
-The production minter (rate limits, one call per user) comes with the token
-endpoint (design doc: Token rules).
 """
 from __future__ import annotations
 
@@ -16,14 +16,18 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from livekit import api
 
-from src.voice.access import new_voice_room, token_metadata
-
 load_dotenv()
-
-LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
-LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "devkey")
-LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "secret")
+# `livekit-server --dev` defaults; the app's minter has none of its own.
+LIVEKIT_URL = os.environ.setdefault("LIVEKIT_URL", "ws://localhost:7880")
+LIVEKIT_API_KEY = os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
+LIVEKIT_API_SECRET = os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
 TEST_EMAIL = os.environ.get("VOICE_TEST_EMAIL", "tester@example.com")
+# This process mints for the test user only, so voice is on for it here.
+os.environ.setdefault("FINNIE_VOICE_ENABLED", "1")
+os.environ.setdefault("FINNIE_VOICE_ALLOWED_EMAILS", TEST_EMAIL)
+
+from src.voice.access import new_voice_room, token_metadata  # noqa: E402
+from src.voice.tokens import mint_call_token  # noqa: E402
 
 
 def local_identity(name: str) -> str:
@@ -50,8 +54,15 @@ def mint_token(identity: str, room: str, email: str = TEST_EMAIL) -> str:
     )
 
 
-def new_call(name: str, email: str = TEST_EMAIL) -> tuple[str, str, str]:
-    """(identity, room, token) for one local call."""
+def new_call(name: str) -> tuple[str, str, str]:
+    """(identity, room, token) for one local call, from the app's minter."""
+    identity = local_identity(name)
+    call = mint_call_token(identity, TEST_EMAIL)
+    return identity, call.room, call.token
+
+
+def raw_call(name: str, email: str) -> tuple[str, str, str]:
+    """(identity, room, token) signed directly with `email`, skipping the minter."""
     identity = local_identity(name)
     room = new_voice_room(identity)
     return identity, room, mint_token(identity, room, email)

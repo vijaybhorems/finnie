@@ -13,6 +13,8 @@ Layout in the LangGraph store, namespace ("users", <user_id>):
              risk_tolerance, events: [...]}          (Goals → Life Timeline)
   session   {active_thread_id}                       (current chat thread)
   settings  {memory_enabled}                         (user's memory switch)
+  voice_tokens {minted: [iso, ...]}                  (voice tokens, last hour only)
+  voice_usage  {day, seconds}                        (voice seconds used today, UTC)
 
 Voice calls are listed in ("users", <user_id>, "voice_calls"), one item per
 call keyed by its thread id. A call's messages live in the checkpointer like a
@@ -31,7 +33,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from langgraph.store.base import BaseStore
@@ -74,6 +76,11 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(v) for v in value]
     return value
+
+
+def _stamp(moment: datetime) -> str:
+    """Fixed-width UTC timestamp, so stored stamps compare correctly as strings."""
+    return moment.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
 def clean_holdings(rows: Any) -> list[dict[str, Any]]:
@@ -192,6 +199,50 @@ class UserData:
             self._voice_namespace, thread_id,
             {"thread_id": thread_id, "channel": "voice", "started_at": started}, index=False,
         )
+
+    def end_voice_call(self, thread_id: str, seconds: float) -> None:
+        """Mark a call ended after `seconds`. Unknown or foreign threads are ignored."""
+        if not self.owns_thread(thread_id):
+            return
+        item = self._store.get(self._voice_namespace, thread_id)
+        if item is None:
+            return
+        ended = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self._store.put(
+            self._voice_namespace, thread_id,
+            {**item.value, "ended_at": ended, "seconds": round(max(0.0, seconds), 1)}, index=False,
+        )
+
+    @staticmethod
+    def _utc(now: Optional[datetime]) -> datetime:
+        return (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+
+    def voice_tokens_last_hour(self, now: Optional[datetime] = None) -> int:
+        """How many voice tokens this user was given in the hour before `now`."""
+        return len(self._recent_tokens(self._utc(now)))
+
+    def _recent_tokens(self, now: datetime) -> list[str]:
+        cutoff, stamp = _stamp(now - timedelta(hours=1)), _stamp(now)
+        minted = (self._get("voice_tokens") or {}).get("minted") or []
+        return [t for t in minted if isinstance(t, str) and cutoff < t <= stamp]
+
+    def record_voice_token(self, now: Optional[datetime] = None) -> None:
+        now = self._utc(now)
+        self._put("voice_tokens", {"minted": [*self._recent_tokens(now), _stamp(now)]})
+
+    def voice_seconds_today(self, now: Optional[datetime] = None) -> float:
+        """Voice seconds this user has used today (UTC day)."""
+        usage = self._get("voice_usage") or {}
+        if usage.get("day") != self._utc(now).date().isoformat():
+            return 0.0
+        return _finite(usage.get("seconds")) or 0.0
+
+    def add_voice_seconds(self, seconds: float, now: Optional[datetime] = None) -> float:
+        """Add to today's voice seconds; returns the new total."""
+        now = self._utc(now)
+        total = self.voice_seconds_today(now) + max(0.0, _finite(seconds) or 0.0)
+        self._put("voice_usage", {"day": now.date().isoformat(), "seconds": round(total, 1)})
+        return total
 
     def voice_calls(self, limit: int = 50) -> list[dict[str, Any]]:
         """This user's voice calls, newest first."""

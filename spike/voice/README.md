@@ -14,7 +14,9 @@ The worker, speech shaping and prefetch moved to `src/voice/` in the Safeguards 
 | `src/voice/worker.py` | LiveKit agent. Checks each call (`src/voice/access.py`), then `llm_node` calls `stream_workflow()` on the call's own thread (the room name). |
 | `src/voice/access.py` | The join checks: voice enabled, a `g-<sub>` identity, a room named `<identity>:<32 hex>`, an allowlisted email in the token metadata. Tested in `tests/test_voice_access.py`. |
 | `src/voice/speech.py` | Removes the written disclaimer and markdown, and releases whole sentences to TTS. Tested in `tests/test_voice_speech.py`. |
-| `local_token.py` | Tokens for the local tools that pass the join checks as `g-local-<name>` with `VOICE_TEST_EMAIL` (default `tester@example.com`). |
+| `src/voice/tokens.py` | The app's token minter: allowlist, 10 tokens an hour, daily minutes, mic-only one-room tokens, one call per user. Tested in `tests/test_voice_tokens.py`. |
+| `src/voice/limits.py` | Call length (20 min, warning at 18), idle prompt at 90 s and hang-up at 120 s, 60 turns, 30 min a day. Tested in `tests/test_voice_limits.py`. |
+| `local_token.py` | Local tools mint through `src/voice/tokens.py` as `g-local-<name>` with `VOICE_TEST_EMAIL` (default `tester@example.com`); `raw_call()` signs one directly to test refusals. |
 | `talk_page.py` | Local Streamlit page with Talk and End buttons and a live transcript. Mints mic-only, 10-minute tokens. |
 | `measure_turns.py` | Times Finnie's share of latency (classifier, first sentence, total) with no voice vendors involved. |
 | `compare_classifier.py` | Runs the production classifier over the eval suite's 44 labelled cases per model and thinking setting: routing and scope accuracy, p50/p95 latency. |
@@ -79,6 +81,14 @@ To run a whole call with no microphone (three questions, two interruptions; Finn
 ```bash
 .venv-voice/bin/python -m spike.voice.scripted_call
 ```
+
+To check the idle limit (stays silent: "Are you still there?" after 90 s, hang-up at 120 s):
+
+```bash
+.venv-voice/bin/python -m spike.voice.scripted_call --idle
+```
+
+The rate limit, daily minutes and voice-call records live in the user's store, which is per process without `DATABASE_URL`. To see them shared between the caller and the worker, give both the same `DATABASE_URL` (run `python -m src.persistence.migrate` on it first).
 
 To check the refusal path (one "Voice isn't available right now" line, then the call ends, nothing saved):
 

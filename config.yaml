@@ -137,6 +137,14 @@ voice:
   classifier_model: "claude-haiku-5-5"   # the worker's process only
   llm_thinking: "disabled"               # the worker's process only
   db_pool_max_size: 2         # per worker process
+  tokens_per_hour: 10         # calls a user may start per hour
+  token_ttl_minutes: 10       # time to join with a token; the call itself continues
+  max_call_minutes: 20
+  call_warning_minutes: 18    # spoken "about two minutes left"
+  idle_prompt_seconds: 90     # "Are you still there?"
+  idle_hangup_seconds: 120
+  max_turns_per_call: 60
+  daily_minutes_per_user: 30
 
 planning:
   default_inflation: 0.03  # used for real (inflation-adjusted) projection view

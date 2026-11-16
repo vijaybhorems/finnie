@@ -490,8 +490,8 @@ The wizard walks through eight stages, checks what already exists at each (safe 
 4. The `finnie` database and user, and a `DATABASE_URL` secret. The password is generated and goes straight into Secret Manager — never shown or written to disk.
 5. Secret access for the runtime account: every secret the service already uses, plus `DATABASE_URL`.
 6. Cloud Build permission to deploy revisions that run as `finnie-run`.
-7. Voice calls (optional, skip to leave voice off): the LiveKit Cloud URL, LiveKit API key and secret, and the Deepgram and ElevenLabs keys, each entered at a hidden prompt and stored straight in Secret Manager; then the voice allowlist. It adds the LiveKit secrets and `FINNIE_VOICE_ENABLED=1` / `FINNIE_VOICE_ALLOWED_EMAILS` to the app service and saves `_VOICE=1` in the deploy command. See [Voice worker](#voice-worker).
-8. The first build and deploy.
+7. Voice calls (optional, skip to leave voice off): the LiveKit Cloud URL (visible prompt), then the LiveKit API key and secret and the Deepgram and ElevenLabs keys at hidden prompts, each stored straight in Secret Manager; then the voice allowlist. It adds the LiveKit secrets and `FINNIE_VOICE_ALLOWED_EMAILS` to the app service and saves `_VOICE=1` in the deploy command. Until the voice worker exists, `FINNIE_VOICE_ENABLED` stays `0`, so Talk never shows without a worker to answer. Once it exists, re-running this stage turns voice on, or changes the allowlist, on both the app and the worker at once. See [Voice worker](#voice-worker).
+8. The build and deploy. On the first voice deploy, once the build succeeds, the wizard sets `FINNIE_VOICE_ENABLED=1` on the app and the worker. Deploying with the saved command instead leaves Talk hidden until you re-run the wizard.
 
 Non-secret choices are saved to `deploy/.gcp.env` (git-ignored), including the exact deploy command.
 

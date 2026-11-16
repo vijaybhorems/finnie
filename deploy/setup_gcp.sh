@@ -194,7 +194,9 @@ finish() {
 # database password goes straight into Secret Manager and is never written
 # to disk or printed.
 
-ENV_FILE="${ENV_FILE:-deploy/.gcp.env}"
+# Assigned outright: the library above already defaulted ENV_FILE to .env (the
+# app's secrets file), so a ${ENV_FILE:-…} default here would never apply.
+ENV_FILE=deploy/.gcp.env
 TOTAL_STAGES=8
 
 # Is a resource there already? (Runs a describe; true if it succeeds.)
@@ -359,7 +361,21 @@ store_secret() {
   printf '  %s✓%s %s stored in Secret Manager (readable by %s)\n' "$GREEN" "$RESET" "$name" "$RUNTIME_SA"
 }
 
+# voice_on / voice_on_worker: FINNIE_VOICE_ENABLED=1 with the allowlist on the app
+# and the worker pool (or the pool alone). Only once the pool exists, so Talk never
+# shows without a worker to answer the call.
+voice_on_worker() {
+  gcloud run worker-pools update finnie-voice --region="$GCP_REGION" \
+    --update-env-vars="^|^FINNIE_VOICE_ENABLED=1|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
+}
+voice_on() {
+  gcloud run services update "$RUN_SERVICE" --region="$GCP_REGION" \
+    --update-env-vars="^|^FINNIE_VOICE_ENABLED=1|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
+  voice_on_worker
+}
+
 VOICE="$(_existing VOICE || echo 0)"
+VOICE_ALLOWED_EMAILS="$(_existing VOICE_ALLOWED_EMAILS || true)"
 say "Voice adds a Talk button beside the chat box for the emails you allow. The"
 say "audio goes through LiveKit Cloud; a worker (Cloud Run worker pool 'finnie-voice')"
 say "turns speech into text with Deepgram, runs the same graph, and speaks with"
@@ -404,19 +420,33 @@ if confirm "Set up or change voice now?"; then
     say "The app mints call tokens, so it needs the LiveKit keys and the allowlist."
     say "This makes a new revision of $RUN_SERVICE with the same image (no rebuild);"
     say "the worker copies both from the app on every deploy."
-    if confirm "Turn voice on for the allowlist in $RUN_SERVICE now?"; then
-      gcloud run services update "$RUN_SERVICE" --region="$GCP_REGION" \
-        --update-secrets=LIVEKIT_URL=LIVEKIT_URL:latest,LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest,LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest \
-        --update-env-vars="^|^FINNIE_VOICE_ENABLED=1|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
-      if exists gcloud run worker-pools describe finnie-voice --region="$GCP_REGION"; then
-        # An allowlist change applies to calls at once, without waiting for a deploy.
-        gcloud run worker-pools update finnie-voice --region="$GCP_REGION" \
+    if exists gcloud run worker-pools describe finnie-voice --region="$GCP_REGION"; then
+      if confirm "Turn voice on for the allowlist in $RUN_SERVICE now?"; then
+        gcloud run services update "$RUN_SERVICE" --region="$GCP_REGION" \
+          --update-secrets=LIVEKIT_URL=LIVEKIT_URL:latest,LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest,LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest \
           --update-env-vars="^|^FINNIE_VOICE_ENABLED=1|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
+        # An allowlist change applies to calls at once, without waiting for a deploy.
+        voice_on_worker
+        VOICE=1
+        write_env VOICE 1
+      else
+        SKIPPED+=("voice: not turned on in $RUN_SERVICE (re-run this stage)")
       fi
-      VOICE=1
-      write_env VOICE 1
     else
-      SKIPPED+=("voice: not turned on in $RUN_SERVICE (re-run this stage)")
+      # No worker yet: Talk would show, and every call would wait for a worker
+      # that isn't there. Voice stays off until the next stage has deployed it.
+      say "No voice worker yet, so Talk stays hidden until the next stage has built and"
+      say "deployed it; the wizard then turns voice on."
+      if confirm "Add the LiveKit keys and allowlist to $RUN_SERVICE now?"; then
+        gcloud run services update "$RUN_SERVICE" --region="$GCP_REGION" \
+          --update-secrets=LIVEKIT_URL=LIVEKIT_URL:latest,LIVEKIT_API_KEY=LIVEKIT_API_KEY:latest,LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest \
+          --update-env-vars="^|^FINNIE_VOICE_ENABLED=0|FINNIE_VOICE_ALLOWED_EMAILS=$VOICE_ALLOWED_EMAILS"
+        VOICE=1
+        write_env VOICE 1
+        write_env VOICE_PENDING 1
+      else
+        SKIPPED+=("voice: keys not added to $RUN_SERVICE (re-run this stage)")
+      fi
     fi
   else
     warn "Some keys are missing, so voice stays as it was. Re-run once you have them."
@@ -436,11 +466,21 @@ write_env DEPLOY_COMMAND "$SUBMIT"
 say "Traffic only moves once the new revision starts and its migrations pass;"
 say "if anything fails, the current revision keeps serving."
 if confirm "Build and deploy now?"; then
-  eval "$SUBMIT"
+  eval "$SUBMIT"   # set -e: a failed build stops the wizard here
   step "Check the new revision's startup: look for 'database ready' and 'postgres_pool_open'."
   note "gcloud run services logs read $RUN_SERVICE --region=$GCP_REGION --limit=50"
+  if [[ "$(_existing VOICE_PENDING || true)" == 1 ]] && (( VOICE == 1 )); then
+    say ""
+    say "The voice worker is deployed; turning voice on for: $VOICE_ALLOWED_EMAILS"
+    voice_on
+    write_env VOICE_PENDING 0
+    printf '  %s✓%s Talk is on for the allowlist\n' "$GREEN" "$RESET"
+  fi
 else
   SKIPPED+=("first deploy: $SUBMIT")
+  if [[ "$(_existing VOICE_PENDING || true)" == 1 ]]; then
+    SKIPPED+=("voice: Talk stays hidden until the worker is deployed; re-run this wizard and deploy at the last stage")
+  fi
 fi
 # ──────────────────────────────────────────────────────────────────────────
 

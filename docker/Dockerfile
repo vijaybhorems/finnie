@@ -20,7 +20,49 @@ RUN pip install --no-cache-dir -r requirements.txt \
       echo "CUDA libraries were installed; a dependency replaced the CPU-only torch" >&2; exit 1; \
     fi
 
+# --- Voice worker venv: the app's venv plus LiveKit Agents -------------------
+# Installed on top of the app's packages, each pinned to the version already
+# there: the worker and the app share the LangGraph checkpoint tables, so they
+# must run the same LangGraph (design doc, Deployment). The build fails if
+# LiveKit ever needs a different version of a shared package.
+FROM builder AS voice-builder
+COPY requirements-voice.txt .
+RUN pip freeze > /tmp/app-versions.txt \
+ && pip install --no-cache-dir -r requirements-voice.txt -c /tmp/app-versions.txt \
+ && if pip list 2>/dev/null | grep -qi '^nvidia-'; then \
+      echo "CUDA libraries were installed; a dependency replaced the CPU-only torch" >&2; exit 1; \
+    fi
+
+# --- Voice worker image (docker build --target voice) ------------------------
+# src/voice/worker.py in production mode, run as a Cloud Run worker pool. Shares
+# the app's base, CPU-only torch and embedding model. No FAISS index: the worker
+# always has DATABASE_URL, so retrieval uses pgvector.
+FROM python:3.12-slim AS voice
+
+COPY --from=voice-builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /app
+
+ENV HF_HOME=/app/.cache/huggingface
+ARG EMBEDDING_MODEL=all-MiniLM-L6-v2
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
+
+COPY . .
+# LiveKit's own models (Silero VAD, the turn detector), baked in like the embedding model.
+RUN python -m src.voice.worker download-files
+
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+ENV TRANSFORMERS_VERBOSITY=error
+ENV TOKENIZERS_PARALLELISM=false
+
+# `start` is LiveKit's production mode: INFO logs (dev mode logs transcripts at
+# DEBUG), and a draining shutdown on SIGTERM.
+ENTRYPOINT []
+CMD ["python", "-m", "src.voice.worker", "start"]
+
 # --- Runtime stage: no compilers --------------------------------------------
+# The web app. Last, so a plain `docker build` (and Docker Compose) builds it.
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

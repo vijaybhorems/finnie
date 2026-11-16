@@ -468,6 +468,10 @@ Cloud Build ── build → push :$BUILD_ID → gcloud run deploy
 Cloud Run (finnie-app, runs as finnie-run@…) ─┼─ Secret Manager  (API keys, OAuth, DATABASE_URL)
    entrypoint: migrate → streamlit            ├─ Cloud SQL       (Unix socket /cloudsql/…)
                                               └─ VPC connector   (Memorystore Redis, optional)
+
+Voice (optional, _VOICE=1):
+Cloud Run worker pool (finnie-voice) ── same Cloud SQL, secrets, runtime account
+   python -m src.voice.worker start  ── LiveKit Cloud ── Deepgram (speech in) / ElevenLabs (speech out)
 ```
 
 ### One-time setup
@@ -478,7 +482,7 @@ Prerequisites: `gcloud auth login`, the existing service and its secrets (API ke
 deploy/setup_gcp.sh
 ```
 
-The wizard walks through seven stages, checks what already exists at each (safe to re-run), and asks before anything billed or disruptive:
+The wizard walks through eight stages, checks what already exists at each (safe to re-run), and asks before anything billed or disruptive:
 
 1. Project, region, APIs.
 2. A least-privilege runtime service account (`finnie-run`), replacing the default compute account, which usually holds Editor.
@@ -486,7 +490,8 @@ The wizard walks through seven stages, checks what already exists at each (safe 
 4. The `finnie` database and user, and a `DATABASE_URL` secret. The password is generated and goes straight into Secret Manager — never shown or written to disk.
 5. Secret access for the runtime account: every secret the service already uses, plus `DATABASE_URL`.
 6. Cloud Build permission to deploy revisions that run as `finnie-run`.
-7. The first build and deploy.
+7. Voice calls (optional, skip to leave voice off): the LiveKit Cloud URL, LiveKit API key and secret, and the Deepgram and ElevenLabs keys, each entered at a hidden prompt and stored straight in Secret Manager; then the voice allowlist. It adds the LiveKit secrets and `FINNIE_VOICE_ENABLED=1` / `FINNIE_VOICE_ALLOWED_EMAILS` to the app service and saves `_VOICE=1` in the deploy command. See [Voice worker](#voice-worker).
+8. The first build and deploy.
 
 Non-secret choices are saved to `deploy/.gcp.env` (git-ignored), including the exact deploy command.
 
@@ -508,6 +513,16 @@ gcloud builds submit --config cloudbuild.yaml \
 **Migrations run before traffic.** The container entrypoint (`docker/entrypoint.sh`) runs `python -m src.persistence.migrate` — LangGraph tables, pgvector schema, knowledge-base sync — before Streamlit listens. If the database is unreachable the new revision never becomes ready and **the previous revision keeps serving**. Several instances starting at once are serialised by an advisory lock.
 
 **Rollback:** `gcloud run services update-traffic finnie-app --region=us-central1 --to-revisions=<previous-revision>=100`, or redeploy an earlier `:$BUILD_ID` image.
+
+### Voice worker
+
+With `_VOICE=1` the build also makes the voice image (`docker build --target voice`: the app's packages plus LiveKit Agents, each shared package pinned to the app's version so both run the same LangGraph) and deploys it as the Cloud Run **worker pool** `finnie-voice`, after the app so its migrations have run first. The worker has no port; it dials out to LiveKit Cloud and takes calls from there.
+
+- **Config is copied from the app service** on every deploy (`deploy/worker_env.py`): the database, Anthropic and data-provider secrets, the LiveKit secrets, `FINNIE_VOICE_ENABLED`, `FINNIE_VOICE_ALLOWED_EMAILS`, Redis and tracing settings. Secrets are copied as references, never values; the sign-in settings stay with the app. The deploy stops with a reason if the app has no LiveKit secrets. To change the allowlist, re-run the wizard's Voice stage (it updates both) or update the app and redeploy.
+- **Sizing:** each call runs in its own process of about 850 MB, and `voice.idle_processes` (2) stay loaded so a call starts without a ~15 s model load. `_VOICE_MEMORY=8Gi` / `_VOICE_CPU=2` hold those plus about four calls at once; `_VOICE_INSTANCES=1` while voice is for testers. Each process opens at most `voice.db_pool_max_size` (2) Cloud SQL connections.
+- **Deploys end calls in progress:** a worker pool gets 10 s between SIGTERM and SIGKILL, and the page shows "The call dropped". Deploy outside testers' calls.
+- **Turning voice off:** `gcloud run services update finnie-app --region=us-central1 --update-env-vars=FINNIE_VOICE_ENABLED=0`, then redeploy (or `gcloud run worker-pools update finnie-voice --update-env-vars=FINNIE_VOICE_ENABLED=0`). The worker re-checks the flag on every call, and the app stops offering Talk.
+- Docker Compose doesn't run the worker; run it locally as in [spike/voice/README.md](spike/voice/README.md).
 
 ### Environment variables
 

@@ -1,7 +1,8 @@
 # The voice worker (src/voice/worker.py), installed on top of requirements.txt into a separate venv:
 #   uv venv .venv-voice --python 3.12
 #   uv pip install --python .venv-voice/bin/python -r requirements.txt -r requirements-voice.txt
-# Resolved 2026-11-10. Note: this moves LangGraph to 1.2.20 (the main venv has 1.2.12);
-# production needs both files to pin the same version (design doc, Deployment).
+# The voice image (docker build --target voice) installs this on top of the app's venv with
+# every installed package as a constraint, so the worker runs exactly the app's LangGraph
+# (they share the checkpoint tables). The build fails if LiveKit ever needs another version.
 livekit-agents[deepgram,elevenlabs,silero,turn-detector]==1.8.11
 # livekit-api is in requirements.txt: the app mints the call tokens.

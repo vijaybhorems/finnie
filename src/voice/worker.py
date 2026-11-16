@@ -32,6 +32,7 @@ os.environ.setdefault("LIVEKIT_URL", "ws://localhost:7880")
 os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
 os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
 
+from livekit.agents.worker import ServerEnvOption  # noqa: E402
 from livekit.agents import (  # noqa: E402
     Agent,
     APIConnectOptions,
@@ -368,10 +369,13 @@ def prewarm(proc: JobProcess) -> None:
 # Prewarm loads the embedding model and the graph (~20-40 s cold); LiveKit's
 # default 10 s initialize timeout kills the process before it can take a call.
 # A draining worker's shutdown callbacks wait for memory saves; give them time.
+# Sizing (voice.idle_processes): see VoiceConfig and the worker pool's memory in cloudbuild.yaml.
 server = AgentServer(
     setup_fnc=prewarm,
     initialize_process_timeout=120,
     shutdown_process_timeout=get_settings().voice.memory_wait_seconds + 5,
+    num_idle_processes=ServerEnvOption(dev_default=0, prod_default=get_settings().voice.idle_processes),
+    job_memory_warn_mb=get_settings().voice.job_memory_warn_mb,
 )
 
 

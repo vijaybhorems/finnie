@@ -135,6 +135,19 @@ class UserData:
             for field, choices in _PROFILE_CHOICES.items()
         }
 
+    def get_chosen_profile(self) -> dict[str, str]:
+        """Only the profile fields the user actually saved (valid ones), no defaults.
+
+        What agents see: a default is not something the user told Finnie, and
+        presenting it as theirs makes the model invent facts about them.
+        """
+        saved = self._get("profile") or {}
+        return {
+            field: saved[field]
+            for field, choices in _PROFILE_CHOICES.items()
+            if saved.get(field) in choices
+        }
+
     def save_profile(self, profile: dict[str, Any]) -> dict[str, str]:
         merged = self.get_profile()
         for field, choices in _PROFILE_CHOICES.items():
@@ -387,11 +400,14 @@ class UserData:
     # ── For the workflow ─────────────────────────────────────────────────────
 
     def to_user_profile(self) -> UserProfile:
-        """The UserProfile agents see: saved profile, holdings and plan."""
+        """The UserProfile agents see: saved profile, holdings and plan.
+
+        Profile fields the user never saved stay None (not the sidebar's defaults).
+        """
         plan = self.get_plan()
         return UserProfile(
             user_id=self._user_id,
-            **self.get_profile(),
+            **self.get_chosen_profile(),
             portfolio=self.get_holdings(),
             goals=[{"type": "life_timeline", **plan}] if plan else [],
         )

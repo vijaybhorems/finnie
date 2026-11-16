@@ -76,10 +76,17 @@ class GoalPlanningAgent(BaseAgent):
         rate_env_str = json.dumps(rate_env, indent=2, default=str)
 
         profile = state.user_profile
-        annual_return = _RETURN_ASSUMPTIONS.get(profile.risk_tolerance, 0.07)
+        # An unset risk tolerance projects at the moderate rate, labelled as an
+        # assumption so the model doesn't call the user a moderate investor.
+        risk = profile.risk_tolerance or "moderate"
+        risk_label = (
+            f"{risk.upper()} INVESTOR" if profile.risk_tolerance
+            else "A MODERATE INVESTOR (assumed: the user hasn't set a risk tolerance)"
+        )
+        annual_return = _RETURN_ASSUMPTIONS.get(risk, 0.07)
 
         # Build projection examples
-        projections = self._build_projection_examples(annual_return, profile.risk_tolerance)
+        projections = self._build_projection_examples(annual_return, risk)
 
         context = f"""
 {self._get_user_context_str(state)}
@@ -89,7 +96,7 @@ class GoalPlanningAgent(BaseAgent):
 CURRENT ECONOMIC ENVIRONMENT (from FRED):
 {rate_env_str}
 
-RETURN ASSUMPTIONS FOR {profile.risk_tolerance.upper()} INVESTOR:
+RETURN ASSUMPTIONS FOR {risk_label}:
 - Expected annual return: {annual_return*100:.1f}%
 - Note: These are historical averages; actual returns will vary
 

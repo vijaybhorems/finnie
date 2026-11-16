@@ -53,7 +53,7 @@ The user is talking to Finnie by voice and will hear this answer, not read it.
 - Answer in 2 to 4 short sentences, about 60 words at most. Put the single most useful point first.
 - Plain spoken English only: no markdown, headings, bullet points, tables, links or symbols that don't read aloud.
 - Say numbers the way a person would ("about seven percent"), and round them.
-- Use what you know about the user (their profile and remembered facts) to shape the answer, but don't recite it back unless they ask what you know about them. Others may be in the room.
+- Use what you know about the user (their profile and remembered facts) to shape the answer, but don't recite it back unless they ask what you know about them. Others may be in the room. Where the context doesn't say something about them, such as their age or how far they are from retirement, don't guess it: say "if you have decades ahead, …".
 - If the topic needs more, end with one short offer to go deeper on a specific part, as a question.
 - This overrides any length or formatting guidance above. The rules about not recommending specific securities still apply."""
 
@@ -64,6 +64,8 @@ _DISCREET_AMOUNTS = """- Don't say any dollar amount: no balances, prices, holdi
 _SPOKEN_AMOUNTS = """- The user turned on spoken amounts: dollar figures may be said, rounded ("about two thousand dollars a month")."""
 
 _HEARD_MAX_CHARS = 400
+
+_PROFILE_FIELDS = ("knowledge_level", "risk_tolerance", "investment_horizon")
 
 
 def _interrupted_note(heard: str) -> str:
@@ -150,12 +152,32 @@ class BaseAgent(ABC):
         return [SystemMessage(content=blocks), *history]
 
     def _get_user_context_str(self, state: FinnieState) -> str:
+        """The user's profile and memories, stating only what the user told Finnie.
+
+        A field the user never set is listed as not set, never filled with a
+        default: "investment_horizon=long" for an empty profile led the model
+        to tell a user it knew nothing about "since you're young...".
+        """
         profile = state.user_profile
-        context = (
-            f"User profile: knowledge_level={profile.knowledge_level}, "
-            f"risk_tolerance={profile.risk_tolerance}, "
-            f"investment_horizon={profile.investment_horizon}"
-        )
+        chosen = {
+            field: getattr(profile, field)
+            for field in _PROFILE_FIELDS
+            if getattr(profile, field)
+        }
+        unset = [field for field in _PROFILE_FIELDS if field not in chosen]
+        if chosen:
+            context = "User profile (set by the user): " + ", ".join(
+                f"{field}={value}" for field, value in chosen.items()
+            )
+            if unset:
+                context += f". Not set: {', '.join(unset)}."
+        else:
+            context = (
+                "User profile: not set. The user hasn't chosen a knowledge level, "
+                "risk tolerance or investment horizon."
+            )
+        if "knowledge_level" in unset:
+            context += " Explain as for a beginner."
         if profile.memories:
             # Per-request (block 3): which memories apply depends on the question.
             lines = "\n".join(

@@ -17,7 +17,7 @@ class TestShouldRemember:
     def test_answered_turns_heard_clearly(self, agent):
         assert should_remember(agent, 0.97, VOICE)
 
-    @pytest.mark.parametrize("agent", ["out_of_scope", "error", None, ""])
+    @pytest.mark.parametrize("agent", ["out_of_scope", "acknowledge", "error", None, ""])
     def test_refused_failed_or_unknown_turns_are_skipped(self, agent):
         assert not should_remember(agent, 0.99, VOICE)
 

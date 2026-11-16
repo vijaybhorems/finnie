@@ -101,6 +101,10 @@ def faq_cache_write_node(state: FinnieState) -> dict[str, Any]:
     if state.channel != "chat":
         # A short spoken answer must never be served to a chat user.
         return {}
+    if state.follow_up:
+        # "What's the exact dollar amount?" is about this conversation; the
+        # same words from someone else mean something else.
+        return {}
     if state.user_profile.memories:
         # The cache is shared by every user: an answer shaped by this user's
         # saved facts must never be served to someone else.

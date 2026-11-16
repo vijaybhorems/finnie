@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from src.core.state import AgentType
 from src.voice.speech import AMOUNT_ON_SCREEN
-from tests.evals.test_router_evals import ROUTING_CASES, _make_state, route_like_production
+from tests.evals.test_router_evals import FOLLOW_UP_CASES, ROUTING_CASES, _make_state, route_like_production
 
 LIVE_MODE = os.environ.get("FINNIE_EVAL_LIVE", "0") == "1"
 # tests/conftest.py replaces every key with a fake; the live turns need the real ones.
@@ -86,6 +86,34 @@ VOICE_ROUTING_CASES = [
     ("whats the wash sale rule", AgentType.TAX_EDUCATION),
 ]
 
+# FOLLOW_UP_CASES, spoken. The previous turn is what the graph saved: the
+# transcript of the question and Finnie's written answer.
+VOICE_FOLLOW_UP_CASES = [
+    (("if i invest ten thousand dollars at seven percent for ten years how much will i have",
+      FOLLOW_UP_CASES[0][0][1]), "whats the exact dollar amount", AgentType.GOAL_PLANNING),
+    (("how much do i need to retire at fifty five", FOLLOW_UP_CASES[1][0][1]),
+     "what if i wait until sixty", AgentType.GOAL_PLANNING),
+    (("how does a roth i r a work", FOLLOW_UP_CASES[2][0][1]),
+     "what about the income limits", AgentType.TAX_EDUCATION),
+    (("what is apple stock doing today", FOLLOW_UP_CASES[3][0][1]),
+     "and whats its r s i", AgentType.MARKET_ANALYSIS),
+    (("analyze my portfolio i have ten shares of apple at a hundred fifty and five shares of microsoft "
+      "at three hundred", FOLLOW_UP_CASES[4][0][1]), "how could i make it less risky", AgentType.PORTFOLIO),
+    (("what happened in the market today", FOLLOW_UP_CASES[5][0][1]),
+     "why did that spook investors", AgentType.NEWS_SYNTHESIZER),
+    (("what is a p e ratio", FOLLOW_UP_CASES[6][0][1]),
+     "can you give me an example", AgentType.FINANCE_QA),
+    (("what is a p e ratio", FOLLOW_UP_CASES[7][0][1]),
+     "now write me a poem about cats", AgentType.OUT_OF_SCOPE),
+    (("how does a roth i r a work", FOLLOW_UP_CASES[8][0][1]),
+     "whats the current price of nvidia", AgentType.MARKET_ANALYSIS),
+    (("how does a roth i r a work", FOLLOW_UP_CASES[9][0][1]), "is that true for everyone", AgentType.TAX_EDUCATION),
+    (("if i invest ten thousand dollars at seven percent for ten years how much will i have",
+      FOLLOW_UP_CASES[10][0][1]), "and in twenty years", AgentType.GOAL_PLANNING),
+    (("what happened in the market today", FOLLOW_UP_CASES[11][0][1]),
+     "say that again more simply", AgentType.NEWS_SYNTHESIZER),
+]
+
 # Spoken company names the classifier must turn into symbols.
 SPOKEN_TICKERS = [
     ("what is apple stock doing today", "AAPL"),
@@ -137,6 +165,17 @@ def voice_process(monkeypatch):
 
 def test_cases_mirror_the_router_evals():
     assert [agent for _, agent in VOICE_ROUTING_CASES] == [agent for _, agent in ROUTING_CASES]
+    assert [agent for *_, agent in VOICE_FOLLOW_UP_CASES] == [agent for *_, agent in FOLLOW_UP_CASES]
+
+
+@pytest.mark.parametrize("previous,query,expected", VOICE_FOLLOW_UP_CASES,
+                         ids=[q[:40] for _, q, _ in VOICE_FOLLOW_UP_CASES])
+def test_spoken_follow_up_routing(previous, query, expected, voice_process):
+    result = route_like_production(_make_state(query, previous))
+    assert result["next_agent"] == expected, (
+        f"follow-up '{query}' after '{previous[0]}' routed to {result['next_agent'].value}, expected "
+        f"{expected.value} (classifier {voice_process.llm.classifier_model}): {result.get('router_reasoning', '')}"
+    )
 
 
 @pytest.mark.parametrize("query,expected", VOICE_ROUTING_CASES, ids=[q[:40] for q, _ in VOICE_ROUTING_CASES])

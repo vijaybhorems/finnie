@@ -264,3 +264,56 @@ class TestStreamWorkflow:
 
         assert "error" in "".join(chunks).lower()
         assert sink["agent_used"] == "error"
+
+
+class TestFollowUpsAndAcknowledgements:
+    """The classifier sees the previous turn; "Stop." ends the turn without an agent."""
+
+    def test_stop_is_acknowledged_without_classifier_or_agent(self, fast_path):
+        from src.workflow.classify import ACKNOWLEDGEMENT
+
+        result = _run(fast_path["graph"], "Stop.")
+
+        assert result["final_response"] == ACKNOWLEDGEMENT
+        assert result["next_agent"] == AgentType.ACKNOWLEDGE
+        assert result["messages"][-1].content == ACKNOWLEDGEMENT  # the turn is answered in the thread
+        assert fast_path["classifier"].invoke.call_count == 0
+        assert fast_path["agent"].calls == 0
+        assert fast_path["cache"].get("Stop.") is None
+
+    def test_follow_up_answer_is_never_cached(self, fast_path):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        fast_path["classifier"].invoke.return_value = Verdict(
+            on_topic=True, agent="finance_qa", needs_macro=False, follow_up=True, reason="follow-up",
+        )
+        history = [HumanMessage(content="What is a P/E ratio?"), AIMessage(content="It compares price to earnings.")]
+        result = fast_path["graph"].invoke(
+            FinnieState(messages=[*history, HumanMessage(content="Can you give me an example?")])
+        )
+
+        assert result["follow_up"] is True
+        sent = fast_path["classifier"].invoke.call_args.args[0]
+        assert "It compares price to earnings." in sent[1]["content"]  # the user message, per request
+        assert "It compares price to earnings." not in sent[0]["content"]  # never the system prompt
+        # Another user's "Can you give me an example?" means something else.
+        assert _run(fast_path["graph"], "Can you give me an example?")["cache_hit"] is False
+
+    def test_early_verdict_with_the_workers_context_is_reused_by_the_graph(self, fast_path):
+        """The voice worker classifies with (previous question, final_response); the graph
+        builds its context from the thread. Same text, so the graph makes no second call."""
+        from src.workflow.classify import classify_query, conversation_context
+        from src.workflow.graph import run_workflow
+
+        user, thread = "g-123", "g-123:" + "a" * 32
+        first = run_workflow("What is a P/E ratio?", user_id=user, thread_id=thread, channel="voice")
+        calls = fast_path["classifier"].invoke.call_count
+
+        # What the worker does while the user is still speaking.
+        classify_query("Can you give me an example?",
+                       context=conversation_context("What is a P/E ratio?", first["final_response"]))
+        assert fast_path["classifier"].invoke.call_count == calls + 1
+
+        run_workflow("Can you give me an example?", user_id=user, thread_id=thread, channel="voice")
+        assert fast_path["classifier"].invoke.call_count == calls + 1  # reused
+        assert fast_path["agent"].calls == 2

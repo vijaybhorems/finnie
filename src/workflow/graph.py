@@ -113,9 +113,10 @@ def route_to_agent(state: FinnieState) -> str:
 
 
 def route_from_classify(state: FinnieState) -> str:
-    """Conditional edge out of the merged classifier: refusal or an agent node."""
-    if route_after_classify(state) == "rejected":
-        return "rejected"
+    """Conditional edge out of the merged classifier: refusal, acknowledgement or an agent node."""
+    outcome = route_after_classify(state)
+    if outcome in ("rejected", "acknowledged"):
+        return outcome
     return route_to_agent(state)
 
 
@@ -188,7 +189,7 @@ def build_graph(persistent: bool = False):
         graph.add_conditional_edges(
             "classify",
             route_from_classify,
-            {"rejected": END, **{name: name for name in AGENT_NODES}},
+            {"rejected": END, "acknowledged": END, **{name: name for name in AGENT_NODES}},
         )
     else:
         graph.add_conditional_edges(

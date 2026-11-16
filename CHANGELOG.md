@@ -18,6 +18,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 - CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
 
 ### Fixed
+- Follow-up questions ("What's the exact dollar amount?") are understood instead of refused, and "Stop." or "never mind" gets a short acknowledgement. ([#50](https://github.com/vijaybhorems/finnie/pull/50))
 - The deploy wizard no longer shows Talk before the voice worker is deployed, and saves its settings to deploy/.gcp.env. ([#47](https://github.com/vijaybhorems/finnie/pull/47))
 - Finnie no longer assumes things about you (such as your age) that you haven't told it. ([#45](https://github.com/vijaybhorems/finnie/pull/45))
 - API keys no longer appear in logs or in error text that reaches answers ([#38](https://github.com/vijaybhorems/finnie/pull/38))

@@ -22,15 +22,23 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="finnie-memory"
 _USER_LOCKS: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
-def remember_turn(user_id: str, message: str, store: Optional[BaseStore] = None) -> list[str]:
+def remember_turn(
+    user_id: str,
+    message: str,
+    store: Optional[BaseStore] = None,
+    min_confidence: Optional[float] = None,
+) -> list[str]:
     """Extract facts from the user's message and save the ones that qualify.
 
     Returns the saved facts' text. Respects the global flag and the user's own
     memory switch; drops low-confidence and sensitive facts. Never raises.
+    `min_confidence` raises the bar above `memory.min_confidence` (voice turns
+    use `voice.memory_min_confidence`); it never lowers it.
     """
     settings = get_settings().memory
     if not settings.enabled:
         return []
+    threshold = max(settings.min_confidence, min_confidence or 0.0)
     try:
         user_data = UserData(user_id, store)
         if not user_data.memory_enabled():
@@ -39,7 +47,7 @@ def remember_turn(user_id: str, message: str, store: Optional[BaseStore] = None)
         saved: list[str] = []
         with _USER_LOCKS[user_id]:
             for fact in extract_facts(message)[: settings.max_facts_per_turn]:
-                if fact.confidence < settings.min_confidence:
+                if fact.confidence < threshold:
                     continue
                 if is_sensitive(fact.fact):
                     logger.warning("memory_fact_rejected_sensitive", category=fact.category)
@@ -59,6 +67,6 @@ def remember_turn(user_id: str, message: str, store: Optional[BaseStore] = None)
         return []
 
 
-def schedule_remember_turn(user_id: str, message: str) -> Future:
-    """Run remember_turn in the background; the chat answer never waits on it."""
-    return _EXECUTOR.submit(remember_turn, user_id, message)
+def schedule_remember_turn(user_id: str, message: str, min_confidence: Optional[float] = None) -> Future:
+    """Run remember_turn in the background; the answer never waits on it."""
+    return _EXECUTOR.submit(remember_turn, user_id, message, None, min_confidence)

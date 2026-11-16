@@ -12,7 +12,7 @@ ends, and leaves nothing saved.
 Needs requirements-voice.txt on top of requirements.txt (spike/voice/README.md):
     .venv-voice/bin/python -m src.voice.worker dev        # joins rooms
     .venv-voice/bin/python -m src.voice.worker console    # laptop mic/speaker, no browser
-Set VOICE_TURN_LOG=spike/voice/runs/turns.jsonl to keep per-turn timings with the question text.
+Set VOICE_TURN_LOG=spike/voice/runs/turns.jsonl to keep per-turn timings with the question and spoken text.
 """
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ from livekit.plugins.turn_detector.english import EnglishModel  # noqa: E402
 from src.core.config import get_settings  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 from src.voice.access import VOICE_UNAVAILABLE, check_join, new_voice_room  # noqa: E402
+from src.voice.memory import MemorySaves, should_remember  # noqa: E402
 from src.voice.limits import DAILY_LIMIT, ENDS_CALL, LINES, TURN_LIMIT, CallMonitor  # noqa: E402
 from src.voice.health import DEEPGRAM, ELEVENLABS, VendorHealth  # noqa: E402
 from src.voice.prefetch import warm_shared_data  # noqa: E402
@@ -75,7 +76,7 @@ SPECULATE = os.environ.get("VOICE_SPECULATE", "1") == "1"  # classify + warm dat
 FILLER = os.environ.get("VOICE_FILLER", "1") == "1"  # say a short line first on slow turns
 WARM_EVERY_S = 60.0  # prices cache for 5 min; re-warm at most once a minute
 USAGE_FLUSH_S = 30.0  # save voice seconds this often, so a crashed call still counts
-TURN_LOG = os.environ.get("VOICE_TURN_LOG", "")  # local measurement only: holds what users said
+TURN_LOG = os.environ.get("VOICE_TURN_LOG", "")  # local measurement only: holds what was said
 
 
 def configure_process() -> None:
@@ -137,6 +138,7 @@ class FinnieVoiceAgent(Agent):
         self.thread_id = thread_id  # the room name: its own thread per call (Open question 1)
         self.monitor: CallMonitor | None = None  # set by the entrypoint; None in tests
         self._heard_before_interrupt: str | None = None
+        self.memories = MemorySaves()  # waited for when the call ends
         self.turns: list[dict[str, Any]] = []
         # Speculation state for the turn being spoken.
         self._finals: list[str] = []
@@ -225,7 +227,7 @@ class FinnieVoiceAgent(Agent):
         tools: list[llm.Tool],
         model_settings: ModelSettings,
     ) -> AsyncIterable[str | FlushSentinel]:
-        question = _last_user_text(chat_ctx)
+        question, confidence = _last_user_turn(chat_ctx)
         self._finals, self._interim = [], ""  # the next turn's transcript starts fresh
         if not question:
             return
@@ -244,6 +246,9 @@ class FinnieVoiceAgent(Agent):
             # Speak it now. Without this, ElevenLabs' sentence splitter holds the
             # line until the answer's first words arrive, which defeats it.
             yield FlushSentinel()
+        voice = get_settings().voice
+        # Read each turn, so the call bar's switch applies from the next answer.
+        speak = await asyncio.to_thread(_speak_amounts, self.user_id, self.thread_id)
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sink: dict[str, Any] = {}
@@ -255,7 +260,7 @@ class FinnieVoiceAgent(Agent):
             try:
                 for token in stream_workflow(
                     question, sink=sink, user_id=self.user_id, thread_id=self.thread_id,
-                    channel="voice", interrupted_after=heard,
+                    channel="voice", interrupted_after=heard, speak_amounts=speak,
                 ):
                     loop.call_soon_threadsafe(queue.put_nowait, token)
             except Exception as exc:  # noqa: BLE001 — stream_workflow reports its own errors
@@ -264,6 +269,12 @@ class FinnieVoiceAgent(Agent):
                 loop.call_soon_threadsafe(queue.put_nowait, "")
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, END)
+                # The run finished, even if the user interrupted the answer:
+                # learn from what they said, as the chat page does.
+                if should_remember(sink.get("agent_used"), confidence, voice):
+                    self.memories.add(self.user_id, question, voice.memory_min_confidence)
+                elif sink.get("agent_used") not in (None, "out_of_scope", "error"):
+                    logger.info("voice_memory_skipped_low_confidence", confidence=confidence)
 
         # The graph is synchronous; run it beside the event loop. On interruption
         # or an abandoned turn this generator stops reading, and the run finishes
@@ -271,15 +282,17 @@ class FinnieVoiceAgent(Agent):
         # (design doc: "When the user interrupts").
         threading.Thread(target=produce, name="finnie-turn", daemon=True).start()
 
-        voice = get_settings().voice
         outcome = TurnOutcome()
+        said: list[str] = []
         try:
             async for spoken in spoken_answer(
                 queue.get, outcome,
                 notice_s=voice.slow_turn_notice_seconds,
                 abandon_s=voice.slow_turn_abandon_seconds,
                 failed=lambda: sink.get("agent_used") == "error",
+                discreet=not speak,
             ):
+                said.append(spoken)
                 yield spoken
                 if spoken in STANDALONE_LINES:
                     yield FlushSentinel()
@@ -290,6 +303,8 @@ class FinnieVoiceAgent(Agent):
                 logger.warning("voice_turn_not_answered", abandoned=outcome.abandoned, failed=outcome.failed)
             self.turns.append({
                 "question": question,
+                "spoken": " ".join(" ".join(said).split()),  # what went to text-to-speech
+                "transcript_confidence": confidence,
                 "agent": sink.get("agent_used"),
                 "cache_hit": sink.get("cache_hit"),
                 "finnie_first_token_s": outcome.first_token_s,
@@ -299,16 +314,29 @@ class FinnieVoiceAgent(Agent):
                 "failed": outcome.failed,
                 "preamble": lines,
                 "after_interruption": heard is not None,
+                "speak_amounts": speak,
                 "verdict_s": verdict_s,  # ~0 when classified while the user spoke
                 "speculate": SPECULATE,
             })
 
 
-def _last_user_text(chat_ctx: llm.ChatContext) -> str:
+def _speak_amounts(user_id: str, thread_id: str) -> bool:
+    """The user's "speak amounts" choice for this call; discreet if it can't be read."""
+    from src.persistence.user_data import UserData
+
+    try:
+        return UserData(user_id).speak_amounts(thread_id)
+    except Exception as exc:  # noqa: BLE001 — discreet is the safe default
+        logger.warning("voice_speak_amounts_unread", error=type(exc).__name__)
+        return False
+
+
+def _last_user_turn(chat_ctx: llm.ChatContext) -> tuple[str, float | None]:
+    """The user's latest words, and how sure speech-to-text was of them (None: not given)."""
     for item in reversed(chat_ctx.items):
         if getattr(item, "role", None) == "user":
-            return (item.text_content or "").strip()
-    return ""
+            return (item.text_content or "").strip(), getattr(item, "transcript_confidence", None)
+    return "", None
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -321,7 +349,12 @@ def prewarm(proc: JobProcess) -> None:
 
 # Prewarm loads the embedding model and the graph (~20-40 s cold); LiveKit's
 # default 10 s initialize timeout kills the process before it can take a call.
-server = AgentServer(setup_fnc=prewarm, initialize_process_timeout=120)
+# A draining worker's shutdown callbacks wait for memory saves; give them time.
+server = AgentServer(
+    setup_fnc=prewarm,
+    initialize_process_timeout=120,
+    shutdown_process_timeout=get_settings().voice.memory_wait_seconds + 5,
+)
 
 
 def _voices(health: VendorHealth) -> list[tts.TTS]:
@@ -576,7 +609,7 @@ async def entrypoint(ctx: JobContext) -> None:
             round(sum(parts), 3) if all(p is not None for p in parts) else None
         )
         # Logs never carry what the user said or the answer; the local file may.
-        logger.info("voice_turn", **{k: v for k, v in record.items() if k not in ("question", "preamble", "at")})
+        logger.info("voice_turn", **{k: v for k, v in record.items() if k not in ("question", "spoken", "preamble", "at")})
         if TURN_LOG:
             path = Path(TURN_LOG)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -620,6 +653,7 @@ async def entrypoint(ctx: JobContext) -> None:
         if (limits := tasks.get("limits")) is not None and limits is not asyncio.current_task():
             limits.cancel()
         await usage.finish(time.monotonic())
+        await asyncio.to_thread(agent.memories.wait, get_settings().voice.memory_wait_seconds)
         logger.info("voice_call_ended", reason=reason, seconds=round(time.monotonic() - usage.started))
         # A vendor that did its job this call closes its breaker (a half-open probe passed).
         ok = {DEEPGRAM} if worked["heard"] else set()
@@ -638,8 +672,12 @@ async def entrypoint(ctx: JobContext) -> None:
         reason = getattr(event, "reason", "closed")
         tasks["wrap_up"] = asyncio.ensure_future(wrap_up(str(getattr(reason, "value", reason))))
 
-    # Backstop for a shutdown that skips the session's close (worker draining).
-    ctx.add_shutdown_callback(lambda: usage.finish(time.monotonic()))
+    async def backstop() -> None:
+        """A shutdown that skips the session's close (worker draining)."""
+        await usage.finish(time.monotonic())
+        await asyncio.to_thread(agent.memories.wait, get_settings().voice.memory_wait_seconds)
+
+    ctx.add_shutdown_callback(backstop)
 
     await session.start(agent=agent, room=ctx.room)
     tasks["limits"] = asyncio.create_task(_enforce_limits(session, monitor, usage, stalls), name="voice-limits")

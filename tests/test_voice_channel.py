@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.base_agent import _VOICE_INSTRUCTION
+from src.agents.base_agent import _DISCREET_AMOUNTS, _SPOKEN_AMOUNTS, _VOICE_INSTRUCTION
 from src.core.state import FinnieState, turn_state_reset
 from tests.test_prompt_caching import _finance_agent, _state
 from tests.test_workflow_fast_path import fast_path  # noqa: F401 (fixture)
@@ -98,3 +98,45 @@ class TestInterruptedAfter:
         assert turn["interrupted_after"] == "heard this"
         _, state, _, _ = _prepare_turn("hi", None, None, None, None, "voice", "heard this")
         assert state.interrupted_after == "heard this"
+
+
+class TestSpeakAmounts:
+    """Discreet by default (design doc, Open question 4); amounts only when the user turned them on."""
+
+    def _context(self, speak: bool | None = None, channel: str = "voice") -> str:
+        state = _voice_state() if channel == "voice" else _state()
+        if speak is not None:
+            state.speak_amounts = speak
+        return "".join(b["text"] for b in _finance_agent()._build_messages(state, "ctx")[0].content)
+
+    def test_voice_is_discreet_by_default(self):
+        context = self._context()
+        assert _DISCREET_AMOUNTS in context and _SPOKEN_AMOUNTS not in context
+
+    def test_amounts_when_turned_on(self):
+        context = self._context(speak=True)
+        assert _SPOKEN_AMOUNTS in context and _DISCREET_AMOUNTS not in context
+
+    def test_chat_gets_neither(self):
+        context = self._context(speak=True, channel="chat")
+        assert _SPOKEN_AMOUNTS not in context and _DISCREET_AMOUNTS not in context
+
+    def test_rules_stay_out_of_the_cached_blocks(self):
+        for speak in (False, True):
+            state = _voice_state()
+            state.speak_amounts = speak
+            shared, role, _ = _finance_agent()._build_messages(state, "ctx")[0].content
+            chat_shared, chat_role, _ = _finance_agent()._build_messages(_state(), "ctx")[0].content
+            assert (shared, role) == (chat_shared, chat_role)
+
+    def test_memories_are_used_silently(self):
+        assert "don't recite it back unless they ask" in _VOICE_INSTRUCTION
+
+    def test_reset_each_turn_and_carried_by_the_turn_input(self):
+        from src.workflow.graph import _prepare_turn
+
+        assert turn_state_reset()["speak_amounts"] is False
+        _, turn, _, _ = _prepare_turn("hi", None, None, "g-1", "g-1:abc", "voice", None, True)
+        assert turn["speak_amounts"] is True
+        _, state, _, _ = _prepare_turn("hi", None, None, None, None, "voice", None, True)
+        assert state.speak_amounts is True

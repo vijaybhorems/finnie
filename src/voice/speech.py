@@ -32,6 +32,44 @@ _MARKDOWN = [
 ]
 
 
+# Discreet mode (design doc, Open question 4): dollar figures are not spoken.
+# The prompt asks for percentages instead; this catches any that get through,
+# as is_sensitive() backs up the memory prompt. The full answer, figures
+# included, is saved and shown on screen.
+AMOUNT_ON_SCREEN = "the amount on your screen"
+
+_NUM = r"\d[\d,]*(?:\.\d+)?"
+_SCALE = r"(?:thousand|million|billion|trillion)"
+_WORD_NUM = (
+    r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
+    r"fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
+    r"eighty|ninety|hundred|thousand|million|billion|trillion)"
+)
+_AMOUNTS = [
+    # $1,234.56  $12k  $1.2M  $3 million  £500  US$40
+    re.compile(rf"(?:US)?[$£€]\s?{_NUM}(?:\s?(?:k|K|m|M|mm|bn|B)\b|\s{_SCALE}\b)?"),
+    # USD 500, 500 USD, 2,000 dollars, 1.5 million dollars, 20 bucks
+    re.compile(rf"\bUSD\s?{_NUM}(?:\s{_SCALE}\b)?"),
+    re.compile(rf"\b{_NUM}(?:\s{_SCALE})?\s(?:dollars?|bucks|USD)\b", re.IGNORECASE),
+    # two thousand dollars, a few hundred dollars, fifty-five dollars
+    re.compile(
+        rf"\b(?:(?:{_WORD_NUM}|a|and|few|several|couple|of)[\s-]+)*{_WORD_NUM}[\s-]+(?:dollars?|bucks)\b",
+        re.IGNORECASE,
+    ),
+]
+# "the amount on your screen to the amount on your screen" -> said once
+_RANGE = re.compile(rf"{AMOUNT_ON_SCREEN}(?:\s*(?:to|and|or|-|–)\s*{AMOUNT_ON_SCREEN})+")
+# "about the amount on your screen" -> no rounding words before a hidden figure
+_HEDGE = re.compile(rf"\b(?:about|roughly|approximately)\s+(?={AMOUNT_ON_SCREEN})", re.IGNORECASE)
+
+
+def mask_amounts(text: str) -> str:
+    """Replace dollar figures with AMOUNT_ON_SCREEN, for discreet speech."""
+    for pattern in _AMOUNTS:
+        text = pattern.sub(AMOUNT_ON_SCREEN, text)
+    return _HEDGE.sub("", _RANGE.sub(AMOUNT_ON_SCREEN, text))
+
+
 def strip_written_disclaimer(text: str) -> str:
     return _WRITTEN_DISCLAIMER.sub("", text)
 

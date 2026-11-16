@@ -8,7 +8,8 @@ Pure (no LiveKit), so CI tests it. The worker wires it to LiveKit events.
 - `spoken_answer()`: turns the graph's token stream into speech, with the
   slow-turn notice at `slow_turn_notice_seconds`, an apology and a stop at
   `slow_turn_abandon_seconds` with no first token, and an apology if the
-  graph fails.
+  graph fails. With `discreet=True` (the default for voice) dollar figures
+  are masked (`speech.mask_amounts`).
 - `StallWatch`: notices speech-to-text going quiet (the user spoke, nothing
   was transcribed) and says when to warn and when to end the call.
 - `heard_answer()`: what the user heard of an answer, minus the preamble, for
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from src.voice.prefetch import FILLERS
-from src.voice.speech import SpeechBuffer, strip_written_disclaimer
+from src.voice.speech import SpeechBuffer, mask_amounts, strip_written_disclaimer
 
 SECURITIES_LINE = "This isn't a recommendation to buy or sell."
 SLOW_NOTICE = "This is taking longer than usual."
@@ -87,13 +88,16 @@ async def spoken_answer(
     notice_s: float,
     abandon_s: float,
     failed: Callable[[], bool] = lambda: False,
+    discreet: bool = False,
     clock: Callable[[], float] = time.monotonic,
 ) -> AsyncIterator[str]:
     """Yield what to say for one turn. `next_item()` returns a token or END.
 
     `failed()` is checked on each token: the graph reports an error as one
-    final token (its error text), which is never spoken.
+    final token (its error text), which is never spoken. `discreet` masks
+    dollar figures in the answer.
     """
+    shape = mask_amounts if discreet else (lambda text: text)
     start = clock()
     buffer = SpeechBuffer()
     noticed = False
@@ -113,7 +117,7 @@ async def spoken_answer(
         else:
             item = await next_item()
         if item is END:
-            tail = buffer.flush()
+            tail = shape(buffer.flush())
             if tail.strip():
                 yield tail
             outcome.completed = True
@@ -124,7 +128,7 @@ async def spoken_answer(
             return
         if outcome.first_token_s is None:
             outcome.first_token_s = round(clock() - start, 3)
-        spoken = buffer.push(strip_written_disclaimer(item))
+        spoken = shape(buffer.push(strip_written_disclaimer(item)))
         if spoken.strip():
             yield spoken
 

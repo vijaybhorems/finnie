@@ -52,9 +52,16 @@ _VOICE_INSTRUCTION = """## This answer will be spoken aloud
 The user is talking to Finnie by voice and will hear this answer, not read it.
 - Answer in 2 to 4 short sentences, about 60 words at most. Put the single most useful point first.
 - Plain spoken English only: no markdown, headings, bullet points, tables, links or symbols that don't read aloud.
-- Say numbers the way a person would ("about seven percent", "two thousand dollars a month"), and round them.
+- Say numbers the way a person would ("about seven percent"), and round them.
+- Use what you know about the user (their profile and remembered facts) to shape the answer, but don't recite it back unless they ask what you know about them. Others may be in the room.
 - If the topic needs more, end with one short offer to go deeper on a specific part, as a question.
 - This overrides any length or formatting guidance above. The rules about not recommending specific securities still apply."""
+
+# Voice, discreet (the default, design doc Open question 4): the full answer
+# with its figures is on the user's screen. src/voice/speech.py masks any
+# dollar figure that gets through anyway.
+_DISCREET_AMOUNTS = """- Don't say dollar amounts, balances, prices, holding sizes or share counts: the figures are on the user's screen. Use percentages, proportions and allocation instead ("up about six percent, mostly in tech"). If they ask for an amount, say it's on their screen."""
+_SPOKEN_AMOUNTS = """- The user turned on spoken amounts: dollar figures may be said, rounded ("about two thousand dollars a month")."""
 
 _HEARD_MAX_CHARS = 400
 
@@ -130,7 +137,8 @@ class BaseAgent(ABC):
         ]
         # Per-request, so it goes in block 3 and never touches the cached prefix.
         if state.channel == "voice":
-            context = f"{context.strip()}\n\n{_VOICE_INSTRUCTION}"
+            amounts = _SPOKEN_AMOUNTS if state.speak_amounts else _DISCREET_AMOUNTS
+            context = f"{context.strip()}\n\n{_VOICE_INSTRUCTION}\n{amounts}"
         if state.interrupted_after:
             context = f"{context.strip()}\n\n{_interrupted_note(state.interrupted_after)}"
         # The API rejects empty text blocks, so an agent with no per-request

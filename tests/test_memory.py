@@ -99,6 +99,8 @@ class TestExtractorGuards:
         ("Card 4111 1111 1111 1111.", True),
         ("Reach them at someone@example.com.", True),
         ("Their password is hunter2.", True),
+        ("Account four five one two six seven eight nine.", True),  # spoken, as voice transcribes it
+        ("Has two or three kids and one dog.", False),
         ("Is 34 years old.", False),
         ("Saving $40,000 for a house deposit by 2028.", False),
         ("Has a 401k and a Roth IRA.", False),

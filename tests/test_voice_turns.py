@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.voice.prefetch import FILLERS
+from src.voice.speech import AMOUNT_ON_SCREEN
 from src.voice.turns import (
     END,
     SECURITIES_LINE,
@@ -54,7 +55,7 @@ def test_heard_answer_drops_the_preamble():
     assert heard_answer(SECURITIES_LINE) == ""
 
 
-async def _speak(items, *, notice=0.05, abandon=0.15, failed=lambda: False, delay=0.0):
+async def _speak(items, *, notice=0.05, abandon=0.15, failed=lambda: False, delay=0.0, discreet=False):
     """Collect what spoken_answer says for tokens arriving after `delay`."""
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -65,7 +66,9 @@ async def _speak(items, *, notice=0.05, abandon=0.15, failed=lambda: False, dela
 
     asyncio.ensure_future(feed())
     outcome = TurnOutcome()
-    said = [s async for s in spoken_answer(queue.get, outcome, notice_s=notice, abandon_s=abandon, failed=failed)]
+    said = [s async for s in spoken_answer(
+        queue.get, outcome, notice_s=notice, abandon_s=abandon, failed=failed, discreet=discreet,
+    )]
     return said, outcome
 
 
@@ -101,6 +104,16 @@ class TestSpokenAnswer:
         outcome = TurnOutcome()
         said = [s async for s in spoken_answer(queue.get, outcome, notice_s=0.05, abandon_s=0.15)]
         assert "Second sentence." in "".join(said) and SORRY not in said
+
+    async def test_discreet_answers_never_say_an_amount(self):
+        # Split across tokens, and in the tail the buffer flushes at the end.
+        said, _ = await _speak(["You hold $12,", "345 in cash. ", "About 2,000 dollars", END], discreet=True)
+        spoken = "".join(said)
+        assert "$" not in spoken and "dollars" not in spoken and spoken.count(AMOUNT_ON_SCREEN) == 2
+
+    async def test_amounts_are_spoken_when_the_user_turned_them_on(self):
+        said, _ = await _speak(["You hold $12,345 in cash.", END], discreet=False)
+        assert "$12,345" in "".join(said)
 
     async def test_graph_error_is_an_apology_not_the_error_text(self):
         # The worker's failed() reads sink["agent_used"] == "error", set before the error token.

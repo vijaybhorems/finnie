@@ -263,6 +263,31 @@ class UserData:
     def set_memory_enabled(self, enabled: bool) -> None:
         self._put("settings", {**(self._get("settings") or {}), "memory_enabled": bool(enabled)})
 
+    def speak_amounts(self, thread_id: Optional[str] = None) -> bool:
+        """Whether voice answers may say dollar amounts aloud; off unless the user turned it on.
+
+        With the call's `thread_id`, the call's own switch wins when it was set
+        ("Speak amounts" on the call bar); otherwise the saved default applies
+        ("Speak amounts by default" in the voice panel).
+        """
+        if thread_id and self.owns_thread(thread_id):
+            call = self._store.get(self._voice_namespace, thread_id)
+            if call is not None and isinstance(call.value.get("speak_amounts"), bool):
+                return call.value["speak_amounts"]
+        return bool((self._get("settings") or {}).get("speak_amounts", False))
+
+    def set_speak_amounts(self, enabled: bool, thread_id: Optional[str] = None) -> None:
+        """Set the saved default, or with `thread_id`, that one call's switch."""
+        if thread_id is None:
+            self._put("settings", {**(self._get("settings") or {}), "speak_amounts": bool(enabled)})
+            return
+        if not self.owns_thread(thread_id):
+            raise ValueError("voice call thread does not belong to this user")
+        call = self._store.get(self._voice_namespace, thread_id)
+        if call is None:
+            raise ValueError("no voice call on this thread")
+        self._store.put(self._voice_namespace, thread_id, {**call.value, "speak_amounts": bool(enabled)}, index=False)
+
     @staticmethod
     def _is_expired(value: dict[str, Any]) -> bool:
         expires_on = value.get("expires_on")

@@ -23,6 +23,9 @@ langgraph-checkpoint-postgres>=3.1.0
 psycopg[binary]>=3.2.0
 psycopg-pool>=3.2.0
 
+# Voice call tokens, minted by the app (src/voice/tokens.py); the worker's own packages are in requirements-voice.txt
+livekit-api==1.2.2
+
 # Web UI
 # Capped: theme.py targets Streamlit's DOM (data-testid wrappers), which changes between
 # releases. Verify the mobile tab bar at phone and desktop widths before raising the cap.

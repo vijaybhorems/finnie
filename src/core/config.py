@@ -206,6 +206,17 @@ class VoiceConfig(BaseModel):
     # The worker holds few concurrent turns per process; chat's pool size would
     # multiply Cloud SQL connections by the number of worker processes.
     db_pool_max_size: int = 2
+    # Starting a call (src/voice/tokens.py).
+    tokens_per_hour: int = 10
+    token_ttl_minutes: int = 10  # to join; a joined call outlives its token
+    # Limits during a call (src/voice/limits.py). Starting points from the
+    # design doc, to revisit with measured cost per minute.
+    max_call_minutes: float = 20
+    call_warning_minutes: float = 18
+    idle_prompt_seconds: float = 90
+    idle_hangup_seconds: float = 120
+    max_turns_per_call: int = 60
+    daily_minutes_per_user: float = 30
 
 
 class AppConfig(BaseModel):

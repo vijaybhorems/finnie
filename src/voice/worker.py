@@ -49,6 +49,7 @@ from livekit.plugins.turn_detector.english import EnglishModel  # noqa: E402
 from src.core.config import get_settings  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 from src.voice.access import VOICE_UNAVAILABLE, check_join, new_voice_room  # noqa: E402
+from src.voice.limits import DAILY_LIMIT, ENDS_CALL, LINES, TURN_LIMIT, CallMonitor  # noqa: E402
 from src.voice.prefetch import FILLERS, warm_shared_data  # noqa: E402
 from src.voice.speech import SESSION_DISCLAIMER, SpeechBuffer, strip_written_disclaimer  # noqa: E402
 
@@ -58,6 +59,7 @@ logger = get_logger("finnie.voice")
 SPECULATE = os.environ.get("VOICE_SPECULATE", "1") == "1"  # classify + warm data while the user speaks
 FILLER = os.environ.get("VOICE_FILLER", "1") == "1"  # say a short line first on slow turns
 WARM_EVERY_S = 60.0  # prices cache for 5 min; re-warm at most once a minute
+USAGE_FLUSH_S = 30.0  # save voice seconds this often, so a crashed call still counts
 TURN_LOG = os.environ.get("VOICE_TURN_LOG", "")  # local measurement only: holds what users said
 
 
@@ -119,6 +121,7 @@ class FinnieVoiceAgent(Agent):
         super().__init__(instructions="Answers come from Finnie's workflow, not this prompt.")
         self.user_id = user_id
         self.thread_id = thread_id  # the room name: its own thread per call (Open question 1)
+        self.monitor: CallMonitor | None = None  # set by the entrypoint; None in tests
         self.turns: list[dict[str, Any]] = []
         # Speculation state for the turn being spoken.
         self._finals: list[str] = []
@@ -207,6 +210,12 @@ class FinnieVoiceAgent(Agent):
         self._finals, self._interim = [], ""  # the next turn's transcript starts fresh
         if not question:
             return
+        if self.monitor is not None:
+            if self.monitor.turn_limit_reached:
+                return  # the goodbye is already said; the call is ending
+            if not self.monitor.start_turn():
+                yield TURN_LIMIT  # instead of answering; _enforce_limits ends the call after it
+                return
         started = time.perf_counter()
         filler = await self._filler_for(question)
         verdict_s = round(time.perf_counter() - started, 3)
@@ -290,19 +299,80 @@ def prewarm(proc: JobProcess) -> None:
 server = AgentServer(setup_fnc=prewarm, initialize_process_timeout=120)
 
 
-async def _refuse(ctx: JobContext, reason: str) -> None:
-    """Say VOICE_UNAVAILABLE and end the call. Nothing is saved for a refused call."""
+async def _refuse(ctx: JobContext, reason: str, line: str = VOICE_UNAVAILABLE) -> None:
+    """Say `line` and end the call. Nothing is saved for a refused call."""
     logger.warning("voice_join_refused", reason=reason)
     session = AgentSession(tts=elevenlabs.TTS(model=get_settings().voice.tts_model))
     try:
         await session.start(agent=Agent(instructions="Refusing this call."), room=ctx.room)
-        await session.say(VOICE_UNAVAILABLE, allow_interruptions=False, add_to_chat_ctx=False)
+        await session.say(line, allow_interruptions=False, add_to_chat_ctx=False)
     except Exception as exc:  # noqa: BLE001 — the call still ends, just without the line
         logger.warning("voice_refusal_line_failed", error=type(exc).__name__)
     finally:
         await session.aclose()
         await ctx.delete_room()
         ctx.shutdown(reason=f"refused: {reason}")
+
+
+class _Usage:
+    """Voice seconds not yet saved to the user's daily total."""
+
+    def __init__(self, data: Any, thread_id: str, started: float) -> None:
+        self._data, self._thread_id, self.started = data, thread_id, started
+        self.saved_until = started
+        self._finished = False
+
+    async def save(self, now: float) -> None:
+        delta, self.saved_until = now - self.saved_until, now  # claimed before awaiting
+        if delta > 0:
+            await asyncio.to_thread(self._data.add_voice_seconds, delta)
+
+    async def finish(self, now: float) -> None:
+        """Save the rest and mark the call ended; once, however the call ends."""
+        if self._finished:
+            return
+        self._finished = True
+        try:
+            await self.save(now)
+            await asyncio.to_thread(self._data.end_voice_call, self._thread_id, now - self.started)
+        except Exception as exc:  # noqa: BLE001 — never block shutdown on bookkeeping
+            logger.warning("voice_usage_save_failed", error=type(exc).__name__)
+
+
+async def _end_call(session: AgentSession, reason: str) -> None:
+    """End the call from the worker's side; the session's close handler wraps up."""
+    logger.info("voice_call_ending", reason=reason)
+    await session.aclose()
+
+
+async def _enforce_limits(session: AgentSession, monitor: CallMonitor, usage: _Usage) -> None:
+    """Once a second: save usage now and then, and act on the call's limits."""
+    while True:
+        await asyncio.sleep(1)
+        now = time.monotonic()
+        if now - usage.saved_until >= USAGE_FLUSH_S:
+            try:
+                await usage.save(now)
+            except Exception as exc:  # noqa: BLE001 — try again at the next flush
+                logger.warning("voice_usage_save_failed", error=type(exc).__name__)
+        if monitor.turn_limit_reached and not monitor.agent_busy:
+            await _end_call(session, "turn_limit")  # TURN_LIMIT was said instead of an answer
+            return
+        action = monitor.tick(now)
+        if action is None:
+            continue
+        logger.info("voice_limit", action=action.value, elapsed_s=round(monitor.elapsed(now)))
+        if action in ENDS_CALL:
+            try:
+                session.interrupt(force=True)  # don't finish a long answer past the limit
+            except RuntimeError:
+                pass  # nothing playing
+            try:
+                await session.say(LINES[action], allow_interruptions=False, add_to_chat_ctx=False)
+            finally:
+                await _end_call(session, action.value)
+            return
+        session.say(LINES[action], add_to_chat_ctx=False)
 
 
 @server.rtc_session()
@@ -323,12 +393,21 @@ async def entrypoint(ctx: JobContext) -> None:
 
     from src.persistence.user_data import UserData
 
-    # Records the call without touching the chat page's active thread.
-    await asyncio.to_thread(UserData(user_id).start_voice_call, thread_id)
-    agent = FinnieVoiceAgent(user_id=user_id, thread_id=thread_id)
-    logger.info("voice_call_started")
-
     voice = get_settings().voice
+    data = UserData(user_id)
+    used_today = await asyncio.to_thread(data.voice_seconds_today)
+    monitor = CallMonitor(voice, used_today, time.monotonic())
+    if monitor.budget_s <= 0:
+        await _refuse(ctx, "daily_limit", DAILY_LIMIT)
+        return
+
+    # Records the call without touching the chat page's active thread.
+    await asyncio.to_thread(data.start_voice_call, thread_id)
+    usage = _Usage(data, thread_id, monitor.started)
+    agent = FinnieVoiceAgent(user_id=user_id, thread_id=thread_id)
+    agent.monitor = monitor
+    logger.info("voice_call_started", budget_s=round(monitor.budget_s))
+
     tts_kwargs: dict[str, Any] = {"model": voice.tts_model}
     if voice.tts_voice_id:
         tts_kwargs["voice_id"] = voice.tts_voice_id
@@ -388,10 +467,36 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("user_state_changed")
     def _on_user_state(event: Any) -> None:
+        monitor.set_user_speaking(event.new_state == "speaking", time.monotonic())
         if event.new_state == "speaking":
             agent.on_user_speaking()
 
+    @session.on("agent_state_changed")
+    def _on_agent_state(event: Any) -> None:
+        monitor.set_agent_busy(event.new_state in ("thinking", "speaking"), time.monotonic())
+
+    tasks: dict[str, asyncio.Task] = {}
+
+    async def wrap_up(reason: str) -> None:
+        """However the call ends (hang-up, a limit, End): stop, save, close the room."""
+        if (limits := tasks.get("limits")) is not None and limits is not asyncio.current_task():
+            limits.cancel()
+        await usage.finish(time.monotonic())
+        logger.info("voice_call_ended", reason=reason, seconds=round(time.monotonic() - usage.started))
+        await ctx.delete_room()
+        # Without this the job lingers until LiveKit empties the room (~20 s).
+        ctx.shutdown(reason=reason)
+
+    @session.on("close")
+    def _on_close(event: Any) -> None:
+        reason = getattr(event, "reason", "closed")
+        tasks["wrap_up"] = asyncio.ensure_future(wrap_up(str(getattr(reason, "value", reason))))
+
+    # Backstop for a shutdown that skips the session's close (worker draining).
+    ctx.add_shutdown_callback(lambda: usage.finish(time.monotonic()))
+
     await session.start(agent=agent, room=ctx.room)
+    tasks["limits"] = asyncio.create_task(_enforce_limits(session, monitor, usage), name="voice-limits")
     await session.say(SESSION_DISCLAIMER, allow_interruptions=False)
 
 

@@ -362,6 +362,12 @@ class TestCrossUserIsolation:
         voice = VoiceConfig(enabled=True, allowed_emails=["*"])
         assert check_join(bob, alice_room, token_metadata("bob@example.com"), voice) == "room_not_owned"
 
+        _user_data(alice).add_voice_seconds(600)
+        _user_data(alice).record_voice_token()
+        assert bob_data.voice_seconds_today() == 0.0 and bob_data.voice_tokens_last_hour() == 0
+        bob_data.end_voice_call(alice_room, 1)  # ignored: not his thread
+        assert "ended_at" not in _user_data(alice).voice_calls()[0]
+
         # Bob's own call sees none of alice's words, and hers is untouched.
         bob_room = new_voice_room(bob)
         _voice_turn(bob, bob_room, "bob spoke")
@@ -399,6 +405,37 @@ class TestVoiceCalls:
         assert data.active_thread_id() == chat_thread
         assert [c["thread_id"] for c in data.voice_calls()] == [room]
         assert data.voice_calls()[0]["channel"] == "voice"
+
+    def test_call_end_is_recorded(self, backend):
+        from src.voice.access import new_voice_room
+
+        user = _new_user()
+        data = _user_data(user)
+        room = new_voice_room(user)
+        data.start_voice_call(room)
+        data.end_voice_call(room, 95.04)
+        call = data.voice_calls()[0]
+        assert call["seconds"] == 95.0 and call["ended_at"]
+
+    def test_tokens_counted_over_a_rolling_hour(self, backend):
+        from datetime import datetime, timedelta, timezone
+
+        data = _user_data(_new_user())
+        t0 = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+        for minutes in (0, 10, 59):
+            data.record_voice_token(t0 + timedelta(minutes=minutes))
+        assert data.voice_tokens_last_hour(t0 + timedelta(minutes=59)) == 3
+        assert data.voice_tokens_last_hour(t0 + timedelta(minutes=61)) == 2
+
+    def test_voice_seconds_reset_each_utc_day(self, backend):
+        from datetime import datetime, timedelta, timezone
+
+        data = _user_data(_new_user())
+        day = datetime(2026, 11, 15, 23, 50, tzinfo=timezone.utc)
+        data.add_voice_seconds(300, now=day)
+        assert data.add_voice_seconds(60.5, now=day) == 360.5
+        assert data.voice_seconds_today(day) == 360.5
+        assert data.voice_seconds_today(day + timedelta(minutes=20)) == 0.0
 
     def test_voice_turns_stay_in_the_call_thread(self, agent):
         from src.voice.access import new_voice_room

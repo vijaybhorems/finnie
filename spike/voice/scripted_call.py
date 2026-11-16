@@ -27,7 +27,7 @@ import httpx
 from dotenv import load_dotenv
 from livekit import rtc
 
-from spike.voice.local_token import LIVEKIT_URL as URL, TEST_EMAIL, new_call
+from spike.voice.local_token import LIVEKIT_URL as URL, TEST_EMAIL, new_call, raw_call
 
 load_dotenv()
 
@@ -81,7 +81,10 @@ class Call:
         self.transcript: list[tuple[str, str]] = []
 
     async def connect(self) -> None:
-        self.identity, _room, token = new_call("scripted", self.email)
+        if self.email == TEST_EMAIL:
+            self.identity, _room, token = new_call("scripted")
+        else:
+            self.identity, _room, token = raw_call("scripted", self.email)
 
         @self.room.on("participant_attributes_changed")
         def _attrs(changed: dict, participant: rtc.Participant) -> None:
@@ -186,11 +189,31 @@ async def refused(email: str) -> None:
         print(f"  {who}: {text}")
 
 
+async def idle() -> None:
+    """Join and say nothing: expect the opening line, "Are you still there?", then a hang-up."""
+    call = Call()
+    await call.connect()
+    started = time.perf_counter()
+    try:
+        await asyncio.wait_for(call.disconnected.wait(), 300)
+        print(f"call ended by the worker after {time.perf_counter() - started:.0f} s")
+    except asyncio.TimeoutError:
+        print("FAIL: the call was not ended")
+        await call.room.disconnect()
+    for who, text in call.transcript:
+        print(f"  {who}: {text}")
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--email", default=TEST_EMAIL, help="email in the token; any other than "
                         "VOICE_TEST_EMAIL checks the refusal path instead of asking questions")
-    email = parser.parse_args().email
+    parser.add_argument("--idle", action="store_true", help="stay silent; expect the idle prompt and hang-up")
+    args = parser.parse_args()
+    email = args.email
+    if args.idle:
+        await idle()
+        return
     if email != TEST_EMAIL:
         await refused(email)
         return

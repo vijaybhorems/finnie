@@ -14,7 +14,8 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
-from spike.voice.local_token import LIVEKIT_URL, TEST_EMAIL, new_call
+from spike.voice.local_token import LIVEKIT_URL, TEST_EMAIL, new_call, raw_call
+from src.voice.tokens import VoiceRefused
 
 # Pinned, as the design doc asks of every CDN script.
 LIVEKIT_CLIENT_JS = "https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.min.js"
@@ -28,7 +29,14 @@ name = st.text_input("Test user", value="tester")
 email = st.text_input("Email in the token (must be on the worker's allowlist)", value=TEST_EMAIL)
 if st.session_state.get("call_for") != (name, email):
     st.session_state.call_for = (name, email)
-    st.session_state.call = new_call(name, email)
+    try:
+        # The test email goes through the app's minter; any other is signed
+        # directly, to hear the worker refuse it.
+        st.session_state.call = new_call(name) if email == TEST_EMAIL else raw_call(name, email)
+    except VoiceRefused as refused:
+        st.session_state.call_for = None
+        st.error(refused.message)
+        st.stop()
 identity, room, token = st.session_state.call
 st.caption(f"Identity `{identity}`, room `{room}`")
 config = json.dumps({"url": LIVEKIT_URL, "token": token, "room": room})

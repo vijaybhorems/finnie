@@ -187,7 +187,8 @@ finish() {
 # One-time Google Cloud setup for Finnie's database-backed features
 # (persistence, pgvector knowledge base, FAQ cache, memory):
 #   Cloud SQL for PostgreSQL · DATABASE_URL secret · least-privilege runtime
-#   service account · Cloud Build deploy permissions · voice (optional) · first deploy.
+#   service account · Cloud Build deploy permissions · voice and its alerts (optional) ·
+#   first deploy.
 #
 # Idempotent: every stage checks what already exists, so re-running is safe.
 # Non-secret choices are remembered in deploy/.gcp.env (git-ignored); the
@@ -197,7 +198,7 @@ finish() {
 # Assigned outright: the library above already defaulted ENV_FILE to .env (the
 # app's secrets file), so a ${ENV_FILE:-…} default here would never apply.
 ENV_FILE=deploy/.gcp.env
-TOTAL_STAGES=8
+TOTAL_STAGES=9
 
 # Is a resource there already? (Runs a describe; true if it succeeds.)
 exists() { "$@" >/dev/null 2>&1; }
@@ -434,8 +435,8 @@ if confirm "Set up or change voice now?"; then
       fi
     else
       # No worker yet: Talk would show, and every call would wait for a worker
-      # that isn't there. Voice stays off until the next stage has deployed it.
-      say "No voice worker yet, so Talk stays hidden until the next stage has built and"
+      # that isn't there. Voice stays off until the last stage has deployed it.
+      say "No voice worker yet, so Talk stays hidden until the last stage has built and"
       say "deployed it; the wizard then turns voice on."
       if confirm "Add the LiveKit keys and allowlist to $RUN_SERVICE now?"; then
         gcloud run services update "$RUN_SERVICE" --region="$GCP_REGION" \
@@ -457,6 +458,64 @@ fi
 pause
 
 # ── 8 ─────────────────────────────────────────────────────────────────────
+stage "Voice alerts (optional)"
+if (( VOICE != 1 )); then
+  note "voice is off: no alerts to set up"
+else
+  say "Email alerts from the voice worker's logs (deploy/voice_monitoring.py):"
+  step "speech provider failures (Deepgram, ElevenLabs) piling up in 15 minutes"
+  step "p95 time to first audio over the last hour above a target"
+  step "estimated voice spend over the last day above a ceiling"
+  say "Log-based metrics count from when they're created; re-run to change a threshold."
+  if confirm "Set up or update voice alerts now?"; then
+    gcloud services enable monitoring.googleapis.com logging.googleapis.com >/dev/null
+    ask ALERT_EMAIL       "Email for voice alerts:"
+    ask ALERT_TTFA_P95    "p95 time to first audio target, seconds [8]:";     ALERT_TTFA_P95="${ALERT_TTFA_P95:-8}"
+    ask ALERT_DAILY_SPEND "Daily voice spend ceiling, US dollars [10]:";      ALERT_DAILY_SPEND="${ALERT_DAILY_SPEND:-10}"
+    ask ALERT_FAILURES    "Provider failures in 15 minutes that alert [3]:";  ALERT_FAILURES="${ALERT_FAILURES:-3}"
+    for key in ALERT_EMAIL ALERT_TTFA_P95 ALERT_DAILY_SPEND ALERT_FAILURES; do write_env "$key" "${!key}"; done
+
+    CHANNEL_NAME="Finnie voice alerts"
+    CHANNEL=$(gcloud beta monitoring channels list --filter="displayName=\"$CHANNEL_NAME\"" --format='value(name)' | head -n1)
+    if [[ -z "$CHANNEL" ]]; then
+      CHANNEL=$(gcloud beta monitoring channels create --display-name="$CHANNEL_NAME" --type=email \
+        --channel-labels=email_address="$ALERT_EMAIL" --format='value(name)')
+    else
+      gcloud beta monitoring channels update "$CHANNEL" --update-channel-labels=email_address="$ALERT_EMAIL" >/dev/null
+    fi
+    printf '  %s✓%s notification channel: %s\n' "$GREEN" "$RESET" "$ALERT_EMAIL"
+
+    ALERTS_DIR=$(mktemp -d)
+    python3 deploy/voice_monitoring.py write "$ALERTS_DIR" --ttfa-p95 "$ALERT_TTFA_P95" \
+      --daily-spend "$ALERT_DAILY_SPEND" --failures "$ALERT_FAILURES" --channel "$CHANNEL" >/dev/null
+    for f in "$ALERTS_DIR"/metrics/*.json; do
+      name=$(basename "$f" .json)
+      if exists gcloud logging metrics describe "$name"; then
+        gcloud logging metrics update "$name" --config-from-file="$f" >/dev/null
+      else
+        gcloud logging metrics create "$name" --config-from-file="$f" >/dev/null
+      fi
+      printf '  %s✓%s log-based metric %s\n' "$GREEN" "$RESET" "$name"
+    done
+    for f in "$ALERTS_DIR"/policies/*.json; do
+      name=$(basename "$f" .json)
+      policy=$(gcloud monitoring policies list --filter="userLabels.alert=${name//_/-}" --format='value(name)' | head -n1)
+      if [[ -n "$policy" ]]; then
+        gcloud monitoring policies update "$policy" --policy-from-file="$f" >/dev/null
+      else
+        gcloud monitoring policies create --policy-from-file="$f" >/dev/null
+      fi
+      printf '  %s✓%s alert policy %s\n' "$GREEN" "$RESET" "$name"
+    done
+    rm -rf "$ALERTS_DIR"
+    note "Console → Monitoring → Alerting lists them; per-day figures: scripts/voice_report.py."
+  else
+    note "voice alerts unchanged"
+  fi
+fi
+pause
+
+# ── 9 ─────────────────────────────────────────────────────────────────────
 stage "Build and deploy"
 SUBMIT="gcloud builds submit --config cloudbuild.yaml --substitutions=_REGION=$GCP_REGION,_SERVICE=$RUN_SERVICE,_RUNTIME_SA=$RUNTIME_SA,_CLOUDSQL_INSTANCE=$SQL_CONNECTION,_VOICE=$VOICE ."
 (( VOICE == 1 )) && say "With _VOICE=1 it also builds and deploys the voice worker (worker pool finnie-voice)."

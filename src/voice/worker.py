@@ -51,7 +51,7 @@ from livekit.plugins import deepgram, elevenlabs, silero  # noqa: E402
 from livekit.plugins.turn_detector.english import EnglishModel  # noqa: E402
 
 from src.core.config import get_settings  # noqa: E402
-from src.utils.logger import get_logger  # noqa: E402
+from src.utils.logger import get_logger, setup_logging  # noqa: E402
 from src.voice.access import VOICE_UNAVAILABLE, check_join, new_voice_room  # noqa: E402
 from src.voice.memory import MemorySaves, should_remember  # noqa: E402
 from src.voice.limits import DAILY_LIMIT, ENDS_CALL, LINES, TURN_LIMIT, CallMonitor  # noqa: E402
@@ -61,6 +61,7 @@ from src.voice.prefetch import warm_shared_data  # noqa: E402
 from src.voice.speech import SESSION_DISCLAIMER  # noqa: E402
 from src.voice.runtime import configure_process  # noqa: E402
 from src.voice.stt import clean_transcript, deepgram_options  # noqa: E402
+from src.voice.usage import TokenMeter, call_summary  # noqa: E402
 from src.voice.turns import (  # noqa: E402
     END,
     HEARING_GIVE_UP,
@@ -84,6 +85,9 @@ TURN_LOG = os.environ.get("VOICE_TURN_LOG", "")  # local measurement only: holds
 
 
 configure_process()
+# JSON lines (and secret redaction) like the app: Cloud Logging parses them into
+# fields, which the log-based metrics and alerts read (design doc, Monitoring).
+setup_logging()
 
 
 class GraphLLM(llm.LLM):
@@ -116,6 +120,7 @@ class FinnieVoiceAgent(Agent):
         self.monitor: CallMonitor | None = None  # set by the entrypoint; None in tests
         self._heard_before_interrupt: str | None = None
         self.memories = MemorySaves()  # waited for when the call ends
+        self.tokens = TokenMeter()  # every Claude call this call makes, for the call summary
         self.turns: list[dict[str, Any]] = []
         self.turn_no = 0  # numbers the page's answer cards; 0 is the opening disclaimer
         # Speculation state for the turn being spoken.
@@ -172,7 +177,7 @@ class FinnieVoiceAgent(Agent):
                     self._spec_done.add(key)
                     logger.info("voice_speculative_classify", words=len(key.split()))
                     try:
-                        await asyncio.to_thread(classify_query, text)
+                        await asyncio.to_thread(classify_query, text, [self.tokens])
                     except Exception:  # noqa: BLE001 — the turn classifies again and fails closed
                         pass
                 text, self._spec_pending = self._spec_pending or "", None
@@ -191,7 +196,7 @@ class FinnieVoiceAgent(Agent):
         try:
             # Usually instant: classified while the user was speaking. If not,
             # this is the turn's one classifier call; the graph reuses it.
-            verdict = await asyncio.to_thread(classify_query, question)
+            verdict = await asyncio.to_thread(classify_query, question, [self.tokens])
         except Exception:  # noqa: BLE001 — the graph classifies again and fails closed
             return []
         return preamble(verdict, filler=FILLER)
@@ -244,6 +249,7 @@ class FinnieVoiceAgent(Agent):
                 for token in stream_workflow(
                     question, sink=sink, user_id=self.user_id, thread_id=self.thread_id,
                     channel="voice", interrupted_after=heard, speak_amounts=speak,
+                    callbacks=[self.tokens],
                 ):
                     loop.call_soon_threadsafe(queue.put_nowait, token)
             except Exception as exc:  # noqa: BLE001 — stream_workflow reports its own errors
@@ -452,10 +458,33 @@ class _Usage:
             logger.warning("voice_usage_save_failed", error=type(exc).__name__)
 
 
+# Why the worker ended a call (idle, a limit, a stall), by session. LiveKit's own
+# close reason for these is just "user_initiated"; the call summary wants ours.
+_END_REASONS: dict[int, str] = {}
+
+
 async def _end_call(session: AgentSession, reason: str) -> None:
     """End the call from the worker's side; the session's close handler wraps up."""
     logger.info("voice_call_ending", reason=reason)
+    _END_REASONS.setdefault(id(session), reason)
     await session.aclose()
+
+
+def _speech_usage(session: AgentSession) -> tuple[float | None, dict[str, int]]:
+    """Audio seconds sent to speech-to-text, and characters spoken by each voice."""
+    stt_seconds: float | None = None
+    tts_chars: dict[str, int] = {}
+    try:
+        for usage in session.usage.model_usage:
+            kind = getattr(usage, "type", "")
+            if kind == "stt_usage":
+                stt_seconds = (stt_seconds or 0.0) + float(usage.audio_duration)
+            elif kind == "tts_usage" and usage.characters_count:
+                model = usage.model or usage.provider or "unknown"
+                tts_chars[model] = tts_chars.get(model, 0) + int(usage.characters_count)
+    except Exception as exc:  # noqa: BLE001 — the summary still logs without speech usage
+        logger.warning("voice_usage_unread", error=type(exc).__name__)
+    return stt_seconds, tts_chars
 
 
 async def _say_and_end(session: AgentSession, line: str, reason: str) -> None:
@@ -554,6 +583,8 @@ async def entrypoint(ctx: JobContext) -> None:
             asyncio.ensure_future(asyncio.to_thread(health.failure, vendor))
 
     speech: tts.TTS = voices[0]
+    # The main voice's breaker was open, so the call starts on the backup.
+    backup_used = {"yes": _vendor_of(voices[0]) != ELEVENLABS}
     if len(voices) > 1:
         # The rest of the call moves to the backup once the main voice fails.
         speech = tts.FallbackAdapter(voices, max_retry_per_tts=1)
@@ -567,6 +598,8 @@ async def entrypoint(ctx: JobContext) -> None:
                 return
             vendor_failed(_vendor_of(event.tts), "tts_unavailable")
             voices_down.add(id(event.tts))
+            if event.tts is voices[0]:
+                backup_used["yes"] = True  # the rest of the call speaks with the backup
             if len(voices_down) == len(voices):  # nothing left to speak with
                 asyncio.ensure_future(send_to_page(user_id, notice_event(SPEECH_DOWN)))
 
@@ -601,6 +634,7 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     pending_user: dict[str, Any] = {}
+    interruptions = {"count": 0}
 
     @session.on("conversation_item_added")
     def _on_item(event: Any) -> None:
@@ -616,6 +650,7 @@ async def entrypoint(ctx: JobContext) -> None:
         if getattr(item, "interrupted", False):
             # LiveKit keeps only what was played in the item: tell the next turn.
             agent.note_interrupted(item.text_content or "")
+            interruptions["count"] += 1
         # What was actually said, beneath the written answer (turn 0: the disclaimer).
         asyncio.ensure_future(send_to_page(user_id, spoken_event(
             agent.turn_no, item.text_content or "", bool(getattr(item, "interrupted", False)),
@@ -684,7 +719,18 @@ async def entrypoint(ctx: JobContext) -> None:
             limits.cancel()
         await usage.finish(time.monotonic())
         await asyncio.to_thread(agent.memories.wait, get_settings().voice.memory_wait_seconds)
-        logger.info("voice_call_ended", reason=reason, seconds=round(time.monotonic() - usage.started))
+        seconds = time.monotonic() - usage.started
+        logger.info("voice_call_ended", reason=reason, seconds=round(seconds))
+        stt_seconds, tts_chars = _speech_usage(session)
+        try:
+            logger.info("voice_call_summary", **call_summary(
+                user_id=user_id, reason=reason, seconds=seconds, turns=agent.turns,
+                interruptions=interruptions["count"], stt_seconds=stt_seconds, tts_chars=tts_chars,
+                tokens=agent.tokens.by_model(), vendor_failures=failed,
+                backup_voice_used=backup_used["yes"], rates=get_settings().voice.cost,
+            ))
+        except Exception as exc:  # noqa: BLE001 — never block shutdown on monitoring
+            logger.warning("voice_call_summary_failed", error=type(exc).__name__)
         # A vendor that did its job this call closes its breaker (a half-open probe passed).
         ok = {DEEPGRAM} if worked["heard"] else set()
         if worked["spoke"]:
@@ -700,7 +746,9 @@ async def entrypoint(ctx: JobContext) -> None:
         if getattr(event, "error", None) is not None:  # closed by an unrecoverable error
             vendor_failed(_vendor_of(error=event.error), type(event.error).__name__)
         reason = getattr(event, "reason", "closed")
-        tasks["wrap_up"] = asyncio.ensure_future(wrap_up(str(getattr(reason, "value", reason))))
+        # The worker's own reason when it ended the call (idle, a limit, a stall).
+        reason = _END_REASONS.pop(id(session), None) or str(getattr(reason, "value", reason))
+        tasks["wrap_up"] = asyncio.ensure_future(wrap_up(reason))
 
     async def backstop() -> None:
         """A shutdown that skips the session's close (worker draining)."""

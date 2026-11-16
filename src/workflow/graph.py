@@ -265,11 +265,21 @@ def _prepare_turn(
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
     speak_amounts: bool = False,
+    callbacks: Optional[list] = None,
 ) -> tuple[Any, Any, dict[str, Any], list]:
     """Pick the graph variant and build (graph, input, config, fallback_messages)."""
     configurable: dict[str, Any] = {}
     if user_id:
         configurable["user_id"] = user_id
+    # Tracing records metadata and tags on every span, so Phoenix can compare
+    # routing and latency by channel (design doc, Monitoring).
+    config: dict[str, Any] = {
+        "configurable": configurable,
+        "metadata": {"channel": channel},
+        "tags": [f"channel:{channel}"],
+    }
+    if callbacks:
+        config["callbacks"] = callbacks
 
     if thread_id:
         _check_thread_owner(user_id, thread_id)
@@ -286,12 +296,12 @@ def _prepare_turn(
             "speak_amounts": speak_amounts,
             "messages": [HumanMessage(content=user_message)],
         }
-        return build_graph(persistent=True), turn, {"configurable": configurable}, turn["messages"]
+        return build_graph(persistent=True), turn, config, turn["messages"]
 
     state = _initial_state(
         user_message, conversation_history, user_profile, channel, interrupted_after, speak_amounts,
     )
-    return build_graph(), state, {"configurable": configurable}, state.messages
+    return build_graph(), state, config, state.messages
 
 
 def _format_result(result: dict[str, Any], fallback_messages: list) -> dict[str, Any]:
@@ -335,6 +345,7 @@ def run_workflow(
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
     speak_amounts: bool = False,
+    callbacks: Optional[list] = None,
 ) -> dict[str, Any]:
     """
     Main entry point for running a single turn through the workflow.
@@ -350,13 +361,15 @@ def run_workflow(
     interrupted_after, speak_amounts
                voice only: what the user heard of the previous answer before
                cutting in, and whether dollar amounts may be spoken.
+    callbacks  LangChain callbacks for every model call in the turn (the voice
+               worker counts tokens this way).
 
     Returns a dict with keys: final_response, agent_used, router_reasoning,
     financial_data, rag_context, cache_hit, messages.
     """
     graph, turn, config, fallback = _prepare_turn(
         user_message, conversation_history, user_profile, user_id, thread_id, channel,
-        interrupted_after, speak_amounts,
+        interrupted_after, speak_amounts, callbacks,
     )
     try:
         result = graph.invoke(turn, config)
@@ -376,6 +389,7 @@ def stream_workflow(
     channel: str = "chat",
     interrupted_after: Optional[str] = None,
     speak_amounts: bool = False,
+    callbacks: Optional[list] = None,
 ) -> Iterator[str]:
     """Yield the answer as it is generated; fill `sink` with the full result.
 
@@ -387,7 +401,7 @@ def stream_workflow(
     """
     graph, turn, config, fallback = _prepare_turn(
         user_message, conversation_history, user_profile, user_id, thread_id, channel,
-        interrupted_after, speak_amounts,
+        interrupted_after, speak_amounts, callbacks,
     )
     streamed: list[str] = []
     final_state: dict[str, Any] = {}

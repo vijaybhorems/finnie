@@ -482,7 +482,7 @@ Prerequisites: `gcloud auth login`, the existing service and its secrets (API ke
 deploy/setup_gcp.sh
 ```
 
-The wizard walks through eight stages, checks what already exists at each (safe to re-run), and asks before anything billed or disruptive:
+The wizard walks through nine stages, checks what already exists at each (safe to re-run), and asks before anything billed or disruptive:
 
 1. Project, region, APIs.
 2. A least-privilege runtime service account (`finnie-run`), replacing the default compute account, which usually holds Editor.
@@ -491,7 +491,8 @@ The wizard walks through eight stages, checks what already exists at each (safe 
 5. Secret access for the runtime account: every secret the service already uses, plus `DATABASE_URL`.
 6. Cloud Build permission to deploy revisions that run as `finnie-run`.
 7. Voice calls (optional, skip to leave voice off): the LiveKit Cloud URL (visible prompt), then the LiveKit API key and secret and the Deepgram and ElevenLabs keys at hidden prompts, each stored straight in Secret Manager; then the voice allowlist. It adds the LiveKit secrets and `FINNIE_VOICE_ALLOWED_EMAILS` to the app service and saves `_VOICE=1` in the deploy command. Until the voice worker exists, `FINNIE_VOICE_ENABLED` stays `0`, so Talk never shows without a worker to answer. Once it exists, re-running this stage turns voice on, or changes the allowlist, on both the app and the worker at once. See [Voice worker](#voice-worker).
-8. The build and deploy. On the first voice deploy, once the build succeeds, the wizard sets `FINNIE_VOICE_ENABLED=1` on the app and the worker. Deploying with the saved command instead leaves Talk hidden until you re-run the wizard.
+8. Voice alerts (optional, voice only): an email notification channel, the worker's log-based metrics and three alert policies. See [Voice monitoring](#voice-monitoring).
+9. The build and deploy. On the first voice deploy, once the build succeeds, the wizard sets `FINNIE_VOICE_ENABLED=1` on the app and the worker. Deploying with the saved command instead leaves Talk hidden until you re-run the wizard.
 
 Non-secret choices are saved to `deploy/.gcp.env` (git-ignored), including the exact deploy command.
 
@@ -523,6 +524,27 @@ With `_VOICE=1` the build also makes the voice image (`docker build --target voi
 - **Deploys end calls in progress:** a worker pool gets 10 s between SIGTERM and SIGKILL, and the page shows "The call dropped". Deploy outside testers' calls.
 - **Turning voice off:** `gcloud run services update finnie-app --region=us-central1 --update-env-vars=FINNIE_VOICE_ENABLED=0`, then redeploy (or `gcloud run worker-pools update finnie-voice --update-env-vars=FINNIE_VOICE_ENABLED=0`). The worker re-checks the flag on every call, and the app stops offering Talk.
 - Docker Compose doesn't run the worker; run it locally as in [spike/voice/README.md](spike/voice/README.md).
+
+### Voice monitoring
+
+The worker logs JSON, one line per turn (`voice_turn`: timings, the agent, never words), one per provider failure (`voice_vendor_failed`) and one per call (`voice_call_summary`):
+
+- why the call ended (`reason`: the worker's own, such as `idle_hangup`, `max_minutes` or `stt_stalled`, else LiveKit's), its length, turns, unanswered turns, interruptions, whether the backup voice spoke, and which vendors failed;
+- usage: audio seconds sent to Deepgram, characters spoken per voice, and Claude tokens per model (every graph run and classifier call, cache reads and writes included);
+- `cost_usd`: an estimate from the list prices in `config.yaml` under `voice.cost`. Replace them with your plans' rates. A model with no price is listed under `unpriced` instead of being guessed.
+
+Phoenix traces carry `channel` in each run's metadata (and a `channel:voice` tag), so routing and latency can be compared by channel.
+
+Per-day figures (calls, end reasons, minutes per user, interruptions, backup voice, vendor failures, cost) and latency by step:
+
+```bash
+gcloud logging read 'jsonPayload.event="voice_call_summary"' --freshness=14d --format=json > calls.json
+python scripts/voice_report.py calls.json
+gcloud logging read 'jsonPayload.event="voice_turn"' --freshness=14d --format=json > turns.json
+python scripts/voice_latency.py turns.json
+```
+
+The wizard's Voice alerts stage (`deploy/voice_monitoring.py`) creates log-based metrics from those lines and three alert policies that email you: provider failures in 15 minutes (default 3), p95 time to first audio over an hour (default 8 s) and estimated spend over a day (default $10). Re-run it to change a threshold. The metrics count from when they're created. The alert queries are PromQL over the log-based metrics and haven't been run against a live project yet: if a policy shows no data after the first calls, check the metric's name in Metrics Explorer.
 
 ### Environment variables
 

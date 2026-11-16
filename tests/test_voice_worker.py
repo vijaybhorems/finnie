@@ -50,7 +50,7 @@ def graph(monkeypatch):
             yield " " + word
         sink["final_response"] = state["answer"]  # as stream_workflow fills it, for the page
 
-    def classify_query(question):
+    def classify_query(question, callbacks=None):
         return SimpleNamespace(on_topic=True, agent=state["verdict_agent"], tickers=state["tickers"])
 
     monkeypatch.setattr("src.workflow.graph.stream_workflow", stream_workflow)
@@ -82,6 +82,14 @@ async def test_a_turn_runs_the_graph_on_the_voice_channel(graph):
     call = graph["calls"][0]
     assert call["channel"] == "voice" and call["thread_id"] == THREAD and call["user_id"] == USER
     assert call["speak_amounts"] is False and call["interrupted_after"] is None
+
+
+async def test_every_turn_counts_its_tokens_on_the_calls_meter(graph):
+    """The call summary's tokens and cost come from this one meter per call."""
+    agent = _agent()
+    await _say("what is a p e ratio", agent)
+    await _say("and a dividend", agent)
+    assert [c["callbacks"] for c in graph["calls"]] == [[agent.tokens], [agent.tokens]]
 
 
 async def test_spelled_out_terms_reach_the_graph_written(graph):

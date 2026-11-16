@@ -187,6 +187,30 @@ class MemoryConfig(BaseModel):
     max_memories_per_user: int = 100
 
 
+class TokenRates(BaseModel):
+    """US dollars per million tokens for one Claude model."""
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float  # 5-minute cache
+
+
+class VoiceCostConfig(BaseModel):
+    """List prices for the estimated cost on each call's `voice_call_summary` log
+    line (src/voice/usage.py). Checked 2026-11-15; replace with your plan's rates.
+    A model missing here is listed as unpriced on the line, not guessed."""
+    livekit_per_minute: float = 0.01        # agent session minutes, billed by the started minute
+    stt_per_minute: float = 0.0077          # Deepgram Nova-3 streaming (a $0.0048 promotion runs)
+    tts_per_1k_chars: dict[str, float] = {
+        "eleven_flash_v2_5": 0.05,
+        "aura-2-asteria-en": 0.03,
+    }
+    llm_per_mtok: dict[str, TokenRates] = {
+        "claude-sonnet-5": TokenRates(input=2.0, output=10.0, cache_read=0.20, cache_write=2.50),
+        "claude-haiku-5-5": TokenRates(input=0.10, output=0.50, cache_read=0.01, cache_write=0.125),
+    }
+
+
 class VoiceConfig(BaseModel):
     """Voice calls (src/voice/): who may call, and what the worker runs.
 
@@ -247,6 +271,7 @@ class VoiceConfig(BaseModel):
     memory_min_transcript_confidence: float = 0.85
     memory_min_confidence: float = 0.9
     memory_wait_seconds: float = 10.0
+    cost: VoiceCostConfig = VoiceCostConfig()
 
 
 class AppConfig(BaseModel):

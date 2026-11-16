@@ -29,7 +29,7 @@ The worker, speech shaping and prefetch moved to `src/voice/` in the Safeguards 
 
 ## Setup
 
-LiveKit Agents 1.8 needs LangGraph 1.2.20, so it gets its own environment and the main `.venv` stays untouched:
+The worker gets its own environment, so LiveKit stays out of the main `.venv`. The voice image pins every package it shares with the app to the app's version (`docker/Dockerfile`); locally, the two venvs may drift, which only matters if a test depends on a version:
 
 ```bash
 uv venv .venv-voice --python 3.12

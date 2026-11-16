@@ -136,11 +136,12 @@ def clear_verdict_cache() -> None:
         _key_locks.clear()
 
 
-def classify_query(query: str) -> Verdict:
+def classify_query(query: str, callbacks: Optional[list] = None) -> Verdict:
     """One structured classifier call, reusing a recent verdict for the same text.
 
     Raises on any model error or empty verdict; errors are never cached.
-    Concurrent calls for the same text share one model call.
+    Concurrent calls for the same text share one model call. `callbacks` see
+    the model call, if one is made (the voice worker counts tokens this way).
     """
     settings = get_settings()
     key = (settings.llm.classifier_model or settings.llm.model, _normalize(query))
@@ -158,7 +159,8 @@ def classify_query(query: str) -> Verdict:
             [
                 {"role": "system", "content": _CLASSIFY_SYSTEM},
                 {"role": "user", "content": f"Classify this query: {query}"},
-            ]
+            ],
+            config={"callbacks": callbacks} if callbacks else None,
         )
         if verdict is None:
             raise ValueError("classifier returned no verdict")

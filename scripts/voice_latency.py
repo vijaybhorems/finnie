@@ -85,6 +85,16 @@ def render(summary: dict[str, dict[str, Any]]) -> str:
     return "\n".join(rows) + "\n\nSeconds, p50 / p95."
 
 
+def _lines(text: str) -> list[str]:
+    """JSON lines as they are; `gcloud logging read --format=json`'s array, one entry per line."""
+    if text.lstrip().startswith("["):
+        try:
+            return [json.dumps(entry) for entry in json.loads(text)]
+        except json.JSONDecodeError:
+            pass
+    return text.splitlines()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("files", nargs="+", type=Path)
@@ -92,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     records = []
     for path in args.files:
-        records += read_records(path.read_text().splitlines(), args.since)
+        records += read_records(_lines(path.read_text()), args.since)
     if not records:
         print("no voice turns found", file=sys.stderr)
         return 1

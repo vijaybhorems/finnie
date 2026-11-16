@@ -163,6 +163,17 @@ voice:
   memory_min_transcript_confidence: 0.85  # skip turns Deepgram was unsure of
   memory_min_confidence: 0.9              # chat uses memory.min_confidence (0.8)
   memory_wait_seconds: 10                 # saves still running when a call ends get this long
+  # Estimated cost on each call's voice_call_summary log line. List prices checked
+  # 2026-11-15; replace with your plans' rates. Unlisted models show as unpriced.
+  cost:
+    livekit_per_minute: 0.01      # agent session minutes, by the started minute
+    stt_per_minute: 0.0077        # Deepgram Nova-3 streaming
+    tts_per_1k_chars:
+      eleven_flash_v2_5: 0.05
+      aura-2-asteria-en: 0.03
+    llm_per_mtok:                 # dollars per million tokens
+      claude-sonnet-5:  {input: 2.0,  output: 10.0, cache_read: 0.20, cache_write: 2.50}
+      claude-haiku-5-5: {input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.125}
 
 planning:
   default_inflation: 0.03  # used for real (inflation-adjusted) projection view

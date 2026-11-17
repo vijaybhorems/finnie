@@ -18,6 +18,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 - CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
 
 ### Changed
+- Voice calls use LiveKit's adaptive interruption when it is reachable, so "uh huh" can be told from a cut-in ([#54](https://github.com/vijaybhorems/finnie/pull/54))
 - Voice answers to finance and tax questions start about 1.7 s sooner. ([#51](https://github.com/vijaybhorems/finnie/pull/51))
 
 ### Fixed

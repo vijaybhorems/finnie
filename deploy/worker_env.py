@@ -80,6 +80,20 @@ def secrets(service: dict) -> str:
     return ",".join(pairs)
 
 
+def _connector_path(service: dict, connector: str) -> str:
+    """The connector's full name. A service's annotation may hold the short name, but a
+    worker pool refuses it ("must be in form projects/{project}/locations/{location}/
+    connectors/{connector}"), so it is built from the service's project and region."""
+    if connector.startswith("projects/"):
+        return connector
+    meta = service.get("metadata", {})
+    project = meta.get("namespace")
+    region = meta.get("labels", {}).get("cloud.googleapis.com/location")
+    if not project or not region:
+        raise SystemExit("the app service description has no project or region for its VPC connector")
+    return f"projects/{project}/locations/{region}/connectors/{connector}"
+
+
 def network(service: dict) -> list[str]:
     """`gcloud run worker-pools deploy` flags that put the worker on the app's VPC.
 
@@ -89,7 +103,7 @@ def network(service: dict) -> list[str]:
     connector = annotations.get("run.googleapis.com/vpc-access-connector")
     interfaces = json.loads(annotations.get("run.googleapis.com/network-interfaces") or "[]")
     if connector:
-        flags = [f"--vpc-connector={connector}"]
+        flags = [f"--vpc-connector={_connector_path(service, connector)}"]
     elif interfaces:
         nic = interfaces[0]
         flags = [f"--{key}={nic[key]}" for key in ("network",) if nic.get(key)]

@@ -33,8 +33,12 @@ substitutions:
   # Each call runs in its own ~850 MB process; voice.idle_processes (2) stay loaded.
   # 8 GiB holds those plus about four calls at once; LiveKit stops giving the
   # instance calls at 70% CPU. One instance while voice is for testers.
+  # 4 vCPU: when a call takes a prewarmed process, LiveKit loads its replacement
+  # (~10 s of model loading) beside the call. On 2 vCPU that hit 0.74-0.85 load in
+  # every test call's first seconds: VAD fell behind real time and the worker
+  # reported itself full, refusing a second caller (2026-11).
   _VOICE_MEMORY: 8Gi
-  _VOICE_CPU: "2"
+  _VOICE_CPU: "4"
   _VOICE_INSTANCES: "1"
 
 options:

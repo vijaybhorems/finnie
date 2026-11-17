@@ -233,6 +233,78 @@ class TestPersistentThreads:
         assert second.final_response == ""
         assert second.cache_hit is False
 
+    def test_state_types_round_trip_without_unregistered_type_warnings(self, agent, backend, monkeypatch, caplog):
+        """Every custom FinnieState type is allow-listed for checkpoint deserialization.
+
+        LangGraph warns ("Deserializing unregistered type ...") about types
+        outside its allow-list and will block them in a future version, which
+        would stop every saved thread from loading. Read back through the real
+        checkpointer, the types must come back as themselves, with no warning.
+        """
+        import logging
+
+        from langgraph.checkpoint.serde import jsonplus
+        from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
+
+        from src.workflow.graph import build_graph
+
+        user_id = _new_user()
+        _user_data(user_id).save_profile({"risk_tolerance": "moderate"})
+        thread = _user_data(user_id).active_thread_id()
+        agent.set_live_data = True
+        _chat(user_id, thread, "what is SPY doing")
+
+        # LangGraph warns once per type per process; start from a clean slate
+        # so an earlier test can't hide the warning, and also count its
+        # (never deduplicated) serde events.
+        monkeypatch.setattr(jsonplus, "_warned_unregistered_types", set())
+        monkeypatch.setattr(jsonplus, "_warned_blocked_types", set())
+        events: list[dict] = []
+        unregister = register_serde_event_listener(events.append)
+        try:
+            with caplog.at_level(logging.WARNING, logger="langgraph"):
+                build_graph.cache_clear()     # a fresh graph reading the saved checkpoint
+                saved = build_graph(persistent=True).get_state({"configurable": {"thread_id": thread}}).values
+                _chat(user_id, thread, "and QQQ?")   # the next turn loads it too
+        finally:
+            unregister()
+
+        assert isinstance(saved["user_profile"], UserProfile)
+        assert saved["user_profile"].risk_tolerance == "moderate"
+        assert isinstance(saved["financial_data"], FinancialData)
+        assert saved["financial_data"].tickers == ["SPY"]
+        assert [e for e in events if e["kind"].startswith("msgpack_")] == []
+        assert not [r for r in caplog.records if "unregistered type" in r.getMessage()
+                    or "Blocked deserialization" in r.getMessage()]
+
+    def test_checkpoint_allow_list_covers_every_state_type(self):
+        """A model or enum added to FinnieState must be registered too (see backend.CHECKPOINT_TYPES)."""
+        import enum
+        import typing
+
+        from pydantic import BaseModel
+
+        from src.persistence.backend import CHECKPOINT_TYPES
+
+        found: set[type] = set()
+
+        def walk(annotation: Any) -> None:
+            if isinstance(annotation, type) and issubclass(annotation, (BaseModel, enum.Enum)):
+                if annotation.__module__.startswith("src.") and annotation not in found:
+                    found.add(annotation)
+                    if issubclass(annotation, BaseModel):
+                        for field in annotation.model_fields.values():
+                            walk(field.annotation)
+                return
+            for arg in typing.get_args(annotation):
+                walk(arg)
+
+        for field in FinnieState.model_fields.values():
+            walk(field.annotation)
+
+        assert {UserProfile, FinancialData} <= found      # the walker sees nested models
+        assert found <= set(CHECKPOINT_TYPES)
+
     def test_reset_covers_every_non_message_field(self):
         assert set(turn_state_reset()) == set(FinnieState.model_fields) - {"messages"}
 

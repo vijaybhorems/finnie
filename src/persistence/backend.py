@@ -17,10 +17,12 @@ from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 
 from src.core.config import get_settings
+from src.core.state import AgentType, FinancialData, UserProfile
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -77,16 +79,31 @@ def _warn_memory_backend(component: str) -> None:
     )
 
 
+# Our own types stored in FinnieState checkpoints. LangGraph only revives
+# types it was told about: anything else logs "Deserializing unregistered
+# type" today, and a future version will refuse it — every saved thread would
+# stop loading. Add any model or enum newly reachable from FinnieState here
+# (TestPersistentThreads checks this list covers them). Built-in safe types
+# (LangChain messages, datetime, UUID, ...) are always allowed. A type left off
+# is not revived: its saved fields come back as a plain dict.
+CHECKPOINT_TYPES: tuple[type, ...] = (AgentType, UserProfile, FinancialData)
+
+
+def checkpoint_serializer() -> JsonPlusSerializer:
+    """The checkpoint serializer, restricted to built-in safe types and ours."""
+    return JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
+
+
 @lru_cache(maxsize=1)
 def get_checkpointer() -> BaseCheckpointSaver:
-    """Conversation-thread checkpointer."""
+    """Conversation-thread checkpointer (chat page and voice worker alike)."""
     if backend_name() == "memory":
         _warn_memory_backend("checkpointer")
-        return InMemorySaver()
+        return InMemorySaver(serde=checkpoint_serializer())
 
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    saver = PostgresSaver(get_pool())
+    saver = PostgresSaver(get_pool(), serde=checkpoint_serializer())
     saver.setup()  # idempotent: creates or migrates the checkpoint tables
     return saver
 

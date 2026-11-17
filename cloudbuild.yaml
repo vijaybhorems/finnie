@@ -145,10 +145,12 @@ steps:
         set -eu
         if [ "${_VOICE}" != "1" ]; then echo "voice off (_VOICE=${_VOICE}): not deploying the worker"; exit 0; fi
         gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /workspace/app-service.json
-        ENV_VARS="$$(python3 deploy/worker_env.py env /workspace/app-service.json)"
-        SECRETS="$$(python3 deploy/worker_env.py secrets /workspace/app-service.json)"
+        # cloud-sdk:slim has no python3 on PATH; gcloud's bundled Python runs this stdlib script.
+        PY="$$(command -v python3 || gcloud info --format='value(basic.python_location)')"
+        ENV_VARS="$$("$$PY" deploy/worker_env.py env /workspace/app-service.json)"
+        SECRETS="$$("$$PY" deploy/worker_env.py secrets /workspace/app-service.json)"
         # One flag per line, none with spaces, so $$NETWORK is left unquoted below.
-        NETWORK="$$(python3 deploy/worker_env.py network /workspace/app-service.json)"
+        NETWORK="$$("$$PY" deploy/worker_env.py network /workspace/app-service.json)"
         echo "worker VPC flags: $${NETWORK:-none (the app has no VPC route)}"
         gcloud run worker-pools deploy ${_VOICE_POOL} \
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}:$BUILD_ID \

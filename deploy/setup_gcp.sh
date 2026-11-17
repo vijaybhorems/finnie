@@ -215,9 +215,10 @@ write_env GCP_PROJECT "$GCP_PROJECT"; write_env GCP_REGION "$GCP_REGION"; write_
 
 gcloud auth print-access-token >/dev/null 2>&1 || { warn "Not signed in to gcloud."; step "Run: gcloud auth login   — then re-run this wizard."; exit 1; }
 gcloud config set project "$GCP_PROJECT" >/dev/null
-step "Enabling APIs (no-op if already on): Cloud SQL Admin, Secret Manager, Cloud Run, Cloud Build, Artifact Registry, IAM"
-gcloud services enable sqladmin.googleapis.com secretmanager.googleapis.com run.googleapis.com \
-  cloudbuild.googleapis.com artifactregistry.googleapis.com iam.googleapis.com
+step "Enabling APIs (no-op if already on): Cloud SQL Admin and component, Secret Manager, Cloud Run, Cloud Build, Artifact Registry, IAM"
+# sql-component: the voice worker pool's --add-cloudsql-instances asks for it; the app service doesn't.
+gcloud services enable sqladmin.googleapis.com sql-component.googleapis.com secretmanager.googleapis.com \
+  run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com iam.googleapis.com
 PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT" --format='value(projectNumber)')
 pause
 

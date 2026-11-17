@@ -25,6 +25,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 - Voice answers to finance and tax questions start about 1.7 s sooner. ([#51](https://github.com/vijaybhorems/finnie/pull/51))
 
 ### Fixed
+- Saved chat and voice conversations will keep loading after LangGraph starts blocking unregistered checkpoint types. ([#62](https://github.com/vijaybhorems/finnie/pull/62))
 - Deploying the voice worker no longer fails in Cloud Build for want of python3 ([#56](https://github.com/vijaybhorems/finnie/pull/56))
 - The setup wizard's voice alerts stage no longer stops before the deploy ([#55](https://github.com/vijaybhorems/finnie/pull/55))
 - The voice worker receives its ElevenLabs key under the name LiveKit reads, so production calls can speak ([#52](https://github.com/vijaybhorems/finnie/pull/52))

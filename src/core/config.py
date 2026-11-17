@@ -259,6 +259,10 @@ class VoiceConfig(BaseModel):
     # falls back to "vad" without them). LiveKit leaves it off in `worker start` unless
     # asked, so it is spelled out here.
     interruption_mode: Literal["adaptive", "vad"] = "adaptive"
+    # On the caller's microphone before speech-to-text (livekit-plugins-noise-cancellation,
+    # LiveKit Cloud only): "bvc" also removes other people's voices, which testers' TVs
+    # and housemates turned into interruptions; "nc" removes noise alone.
+    noise_cancellation: Literal["bvc", "nc", "none"] = "bvc"
     interruption_min_duration: float = 0.5  # shorter speech ("uh-huh") doesn't interrupt
     interruption_min_words: int = 0
     false_interruption_timeout: float = 2.0  # resume if the "interruption" had no words

@@ -5,4 +5,6 @@
 # every installed package as a constraint, so the worker runs exactly the app's LangGraph
 # (they share the checkpoint tables). The build fails if LiveKit ever needs another version.
 livekit-agents[deepgram,elevenlabs,silero,turn-detector]==1.8.11
+# Background voice cancellation on the caller's mic (voice.noise_cancellation). LiveKit Cloud only.
+livekit-plugins-noise-cancellation==0.3.3
 # livekit-api is in requirements.txt: the app mints the call tokens.

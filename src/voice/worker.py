@@ -45,9 +45,10 @@ from livekit.agents import (  # noqa: E402
     llm,
     tts,
 )
+from livekit.agents import room_io  # noqa: E402
 from livekit.agents.types import FlushSentinel  # noqa: E402
 from livekit.agents.voice.agent_session import SessionConnectOptions  # noqa: E402
-from livekit.plugins import deepgram, elevenlabs, silero  # noqa: E402
+from livekit.plugins import deepgram, elevenlabs, noise_cancellation, silero  # noqa: E402
 from livekit.plugins.turn_detector.english import EnglishModel  # noqa: E402
 
 from src.core.config import get_settings  # noqa: E402
@@ -433,6 +434,17 @@ server = AgentServer(
 )
 
 
+_NOISE_CANCELLATION = {"bvc": noise_cancellation.BVC, "nc": noise_cancellation.NC}
+
+
+def _room_options() -> room_io.RoomOptions:
+    """The caller's audio cleaned before VAD and speech-to-text (voice.noise_cancellation)."""
+    make = _NOISE_CANCELLATION.get(get_settings().voice.noise_cancellation)
+    if make is None:
+        return room_io.RoomOptions()
+    return room_io.RoomOptions(audio_input=room_io.AudioInputOptions(noise_cancellation=make()))
+
+
 def _voices(health: VendorHealth) -> list[tts.TTS]:
     """The main voice, then the backup from another vendor; open breakers left out."""
     voice = get_settings().voice
@@ -808,7 +820,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(backstop)
 
-    await session.start(agent=agent, room=ctx.room)
+    await session.start(agent=agent, room=ctx.room, room_options=_room_options())
     tasks["limits"] = asyncio.create_task(_enforce_limits(session, monitor, usage, stalls), name="voice-limits")
     await session.say(SESSION_DISCLAIMER, allow_interruptions=False)
 

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import importlib
+import os
+import subprocess
 import sys
 import threading
-
-import pytest
+from pathlib import Path
 
 from src.voice import preload
 
@@ -30,23 +31,47 @@ def test_a_failing_import_is_reported_not_raised(monkeypatch):
     assert result["failed"] == ["src.workflow.graph"]
 
 
-def test_tracing_leaves_langchain_to_the_job_process(monkeypatch):
-    """Phoenix must patch LangChain before it is imported; a forkserver import would come first."""
-    monkeypatch.setattr(preload, "_tracing_on", lambda: True)
-    imported: list[str] = []
-    monkeypatch.setattr(preload.importlib, "import_module", lambda name: imported.append(name))
-    preload.preload()
-    assert imported == list(preload.HEAVY)
+_SPANS_AFTER_PRELOAD = """
+import sys
+import src.voice.preload  # as in the forkserver: LangChain and LangGraph are imported first
+assert "langchain_core" in sys.modules and "langgraph" in sys.modules
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from openinference.instrumentation.langchain import LangChainInstrumentor
+
+spans = InMemorySpanExporter()
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(spans))
+LangChainInstrumentor().instrument(tracer_provider=provider)  # what setup_tracing() runs, later
+
+from typing import TypedDict
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langgraph.graph import END, START, StateGraph
+
+class State(TypedDict):
+    q: str
+    a: str
+
+model = FakeListChatModel(responses=["hi"])
+graph = StateGraph(State)
+graph.add_node("agent", lambda s: {"a": model.invoke(s["q"]).content})
+graph.add_edge(START, "agent")
+graph.add_edge("agent", END)
+graph.compile().invoke({"q": "x"})
+print(sorted({span.name for span in spans.get_finished_spans()}))
+"""
 
 
-@pytest.mark.parametrize("enabled,endpoint,on", [(False, "", False), (True, "", False), (True, "http://x:4317", True)])
-def test_tracing_on_needs_both_flag_and_endpoint(monkeypatch, enabled, endpoint, on):
-    from src.core.config import get_settings
-
-    tracing = get_settings().tracing
-    monkeypatch.setattr(tracing, "enabled", enabled)
-    monkeypatch.setattr(tracing, "endpoint", endpoint)
-    assert preload._tracing_on() is on
+def test_tracing_still_records_spans_when_langchain_was_preloaded():
+    """Production runs Phoenix tracing, which starts in the job process after the forkserver's imports."""
+    root = Path(__file__).resolve().parents[1]
+    done = subprocess.run([sys.executable, "-c", _SPANS_AFTER_PRELOAD], cwd=root, capture_output=True, text=True,
+                          env={**os.environ, "PYTHONPATH": str(root)}, timeout=180)
+    assert done.returncode == 0, done.stderr[-2000:]
+    names = done.stdout.strip().splitlines()[-1]
+    for span in ("LangGraph", "agent", "FakeListChatModel"):
+        assert span in names
 
 
 def test_starts_no_threads():

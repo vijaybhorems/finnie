@@ -25,6 +25,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 - Voice answers to finance and tax questions start about 1.7 s sooner. ([#51](https://github.com/vijaybhorems/finnie/pull/51))
 
 ### Fixed
+- Voice calls in production no longer start with a burst of CPU starvation while the next call's process loads. ([#64](https://github.com/vijaybhorems/finnie/pull/64))
 - Voice calls no longer start with a burst of CPU starvation while the worker prepares the next call's process. ([#63](https://github.com/vijaybhorems/finnie/pull/63))
 - Saved chat and voice conversations will keep loading after LangGraph starts blocking unregistered checkpoint types. ([#62](https://github.com/vijaybhorems/finnie/pull/62))
 - Deploying the voice worker no longer fails in Cloud Build for want of python3 ([#56](https://github.com/vijaybhorems/finnie/pull/56))

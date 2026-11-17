@@ -38,7 +38,7 @@ FINNIE_EVAL_LIVE=1 pytest tests/evals/test_prompt_cache_evals.py -v -s   # prove
 FINNIE_EVAL_LIVE=1 pytest tests/evals/test_voice_routing_evals.py -v -s  # spoken-style routing + voice answers (length, markdown, amounts, Haiku naturalness judge)
 FINNIE_EVAL_LIVE=1 pytest tests/evals/test_user_assumption_evals.py -v -s # an empty user's Roth question, chat + voice: no claims about their age or situation (Haiku judge)
 FINNIE_EVAL_AUDIO=1 pytest tests/evals/test_stt_evals.py -v -s            # Deepgram on ~430 synthesised finance clips (macOS say + ffmpeg; a few cents; cached) — after changing src/voice/stt.py
-FINNIE_EVAL_CALLS=1 .venv-voice/bin/python -m pytest tests/evals/test_simulated_calls.py -v -s --no-cov   # whole calls over audio vs a real worker on local LiveKit (~$1.50 all; FINNIE_EVAL_CALL_SCENARIOS=basic,idle picks some); stop other workers first
+FINNIE_EVAL_CALLS=1 .venv-voice/bin/python -m pytest tests/evals/test_simulated_calls.py -v -s --no-cov   # whole calls over audio vs a real worker on local LiveKit, or a test LiveKit Cloud project named by SIM_LIVEKIT_* in .env (~$1.50 all; FINNIE_EVAL_CALL_SCENARIOS=basic,idle picks some); stop other workers first
 .venv-voice/bin/python scripts/voice_turn_sweep.py --grid endpointing_min_delay=0.4,0.5,0.8 --repeat 2   # turn-taking scenarios per voice setting (any voice.* key): split questions, missed cut-ins, first audio (5-10 cents a call)
 .venv-voice/bin/python -m pytest tests/test_voice_worker.py --no-cov      # the worker's turn in LiveKit's text-only mode (skipped without LiveKit, so in CI)
 python scripts/voice_latency.py spike/voice/runs/turns.jsonl              # p50/p95 per step and turn type, from the turn log or voice_turn log lines

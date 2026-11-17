@@ -45,24 +45,18 @@ APP = (
     "src.voice.prefetch",
     "src.voice.turns",
     "src.voice.usage",
+    # Phoenix tracing (on in production). Its LangChain instrumentor patches a
+    # class method when the job process calls setup_tracing(), so LangChain being
+    # imported here first doesn't stop spans (tests/test_voice_preload.py).
+    "phoenix.otel",
+    "openinference.instrumentation.langchain",
 )
-
-
-def _tracing_on() -> bool:
-    """Phoenix tracing patches LangChain as it is imported, so it must come first (src/core/tracing.py)."""
-    try:
-        from src.core.config import get_settings
-
-        tracing = get_settings().tracing
-        return bool(tracing.enabled and tracing.endpoint)
-    except Exception:  # noqa: BLE001 — unknown: assume on, and leave LangChain to the job process
-        return True
 
 
 def preload() -> dict[str, object]:
     """Import what a call process needs; never raises. Returns what was imported and how long it took."""
     started = time.perf_counter()
-    names = HEAVY + (() if _tracing_on() else APP)
+    names = HEAVY + APP
     failed = []
     for name in names:
         try:

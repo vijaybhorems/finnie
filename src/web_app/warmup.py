@@ -30,8 +30,8 @@ def _run() -> None:
     started = time.monotonic()
     try:
         setup_logging()
-        # Tracing must be registered before LangChain/LangGraph are imported so
-        # the OpenInference instrumentor can patch them — so it runs here, first.
+        # Tracing first, so it is registered before the first LangChain run
+        # (its instrumentor patches LangChain's classes, whenever they were imported).
         from src.core.tracing import setup_tracing
 
         try:

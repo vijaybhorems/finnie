@@ -4,9 +4,11 @@ Auto-instruments LangChain + LangGraph (the LangChain instrumentor covers
 LangGraph nodes and ``langchain-anthropic``) and exports spans to a Phoenix
 collector.
 
-IMPORTANT: ``setup_tracing()`` must run BEFORE any LangChain/LangGraph module is
-imported so the instrumentor can patch them. Call it at the very start of the
-process entry point (see ``src/web_app/app.py``).
+Call ``setup_tracing()`` early in the process entry point (``src/web_app/warmup.py``),
+before the first LangChain run, so every run is traced. The LangChain instrumentor
+patches ``BaseCallbackManager.__init__`` on the class, so LangChain having been
+imported already is fine: the voice worker's forkserver imports it before each
+job process sets up tracing (``tests/test_voice_preload.py``).
 
 Tracing is a strict no-op unless ``tracing.enabled`` is true AND an endpoint is
 configured, so the app never hard-depends on a running Phoenix instance.

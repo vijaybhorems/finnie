@@ -12,6 +12,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 ## Unreleased
 
 ### Added
+- Voice calls cancel background voices (TV, other people) on the caller's microphone ([#59](https://github.com/vijaybhorems/finnie/pull/59))
 - Simulated-call voice evals (layer 5) and a turn-detection sweep script ([#49](https://github.com/vijaybhorems/finnie/pull/49))
 - Voice calls log a per-call summary with usage and estimated cost, traces are tagged by channel, and the deploy wizard can set up voice alerts. ([#48](https://github.com/vijaybhorems/finnie/pull/48))
 - Voice calls can be deployed to Google Cloud as a Cloud Run worker pool, set up by the deploy wizard. ([#46](https://github.com/vijaybhorems/finnie/pull/46))

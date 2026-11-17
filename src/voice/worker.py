@@ -670,6 +670,8 @@ async def entrypoint(ctx: JobContext) -> None:
             # "uh-huh" while Finnie speaks shouldn't stop the answer; a cut-in
             # with no words resumes it.
             "interruption": {
+                # LiveKit leaves adaptive off in production mode unless it is named.
+                "mode": voice.interruption_mode,
                 "min_duration": voice.interruption_min_duration,
                 "min_words": voice.interruption_min_words,
                 "resume_false_interruption": True,

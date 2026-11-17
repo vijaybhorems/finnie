@@ -255,6 +255,10 @@ class VoiceConfig(BaseModel):
     # Turn taking. LiveKit's defaults to start; tune with simulated calls.
     endpointing_min_delay: float = 0.5   # silence before a turn may end
     endpointing_max_delay: float = 3.0   # longest wait for a mid-question pause
+    # "adaptive": LiveKit Cloud's model tells a cut-in from "uh-huh" (needs Cloud keys;
+    # falls back to "vad" without them). LiveKit leaves it off in `worker start` unless
+    # asked, so it is spelled out here.
+    interruption_mode: Literal["adaptive", "vad"] = "adaptive"
     interruption_min_duration: float = 0.5  # shorter speech ("uh-huh") doesn't interrupt
     interruption_min_words: int = 0
     false_interruption_timeout: float = 2.0  # resume if the "interruption" had no words

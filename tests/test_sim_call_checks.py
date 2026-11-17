@@ -189,7 +189,17 @@ class TestVoiceSettingsOverride:
         voice = get_settings().voice
         assert voice.endpointing_min_delay == 0.8 and voice.idle_prompt_seconds == 12
 
-    @pytest.mark.parametrize("raw", ['{"idle_prompt_seconds": "soon"}', '{"endpointing_min_dealy": 0.8}'])
+    def test_interruption_mode_is_adaptive_unless_a_run_asks_for_vad(self, monkeypatch):
+        """Spelled out: LiveKit leaves adaptive off in `worker start` unless it is named."""
+        from src.core.config import get_settings
+
+        assert get_settings().voice.interruption_mode == "adaptive"
+        get_settings.cache_clear()
+        monkeypatch.setenv("FINNIE_VOICE_SETTINGS", '{"interruption_mode": "vad"}')
+        assert get_settings().voice.interruption_mode == "vad"
+
+    @pytest.mark.parametrize("raw", ['{"idle_prompt_seconds": "soon"}', '{"endpointing_min_dealy": 0.8}',
+                                     '{"interruption_mode": "smart"}'])
     def test_unknown_or_bad_values_are_refused(self, monkeypatch, raw):
         from src.core.config import get_settings
 

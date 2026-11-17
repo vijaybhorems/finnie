@@ -198,8 +198,13 @@ class TestVoiceSettingsOverride:
         monkeypatch.setenv("FINNIE_VOICE_SETTINGS", '{"interruption_mode": "vad"}')
         assert get_settings().voice.interruption_mode == "vad"
 
+    def test_background_voices_are_cancelled_by_default(self):
+        from src.core.config import get_settings
+
+        assert get_settings().voice.noise_cancellation == "bvc"
+
     @pytest.mark.parametrize("raw", ['{"idle_prompt_seconds": "soon"}', '{"endpointing_min_dealy": 0.8}',
-                                     '{"interruption_mode": "smart"}'])
+                                     '{"interruption_mode": "smart"}', '{"noise_cancellation": "krisp"}'])
     def test_unknown_or_bad_values_are_refused(self, monkeypatch, raw):
         from src.core.config import get_settings
 

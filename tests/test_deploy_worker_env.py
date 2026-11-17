@@ -16,7 +16,10 @@ _spec.loader.exec_module(worker_env)
 
 
 def _service(env: list[dict]) -> dict:
-    return {"spec": {"template": {"spec": {"containers": [{"env": env}]}}}}
+    return {
+        "metadata": {"namespace": "993895079602", "labels": {"cloud.googleapis.com/location": "us-central1"}},
+        "spec": {"template": {"spec": {"containers": [{"env": env}]}}},
+    }
 
 
 def _secret(name: str, secret: str | None = None, version: str = "latest") -> dict:
@@ -114,7 +117,24 @@ def test_the_worker_uses_the_apps_vpc_connector_for_private_addresses_only():
     The worker takes the same route, but only for private ranges, even when the app sends
     everything: call audio and the speech vendors keep Cloud Run's internet egress."""
     app = _with_annotations(APP, vpc_access_connector="finnie-vpc-connector", vpc_access_egress="all-traffic")
-    assert worker_env.network(app) == ["--vpc-connector=finnie-vpc-connector", "--vpc-egress=private-ranges-only"]
+    assert worker_env.network(app) == [
+        # Full name: a worker pool refuses the short one the service annotation holds.
+        "--vpc-connector=projects/993895079602/locations/us-central1/connectors/finnie-vpc-connector",
+        "--vpc-egress=private-ranges-only",
+    ]
+
+
+def test_a_connector_already_in_full_is_kept():
+    full = "projects/p/locations/europe-west1/connectors/c"
+    app = _with_annotations(APP, vpc_access_connector=full)
+    assert worker_env.network(app)[0] == f"--vpc-connector={full}"
+
+
+def test_a_short_connector_with_no_project_or_region_stops_the_deploy():
+    app = _with_annotations(APP, vpc_access_connector="finnie-vpc-connector")
+    del app["metadata"]
+    with pytest.raises(SystemExit, match="project or region"):
+        worker_env.network(app)
 
 
 def test_the_worker_mirrors_direct_vpc_egress():
@@ -135,4 +155,7 @@ def test_network_flags_print_one_per_line(tmp_path):
     path.write_text(json.dumps(_with_annotations(APP, vpc_access_connector="finnie-vpc-connector")))
     out = subprocess.run([sys.executable, str(SCRIPT), "network", str(path)],
                          capture_output=True, text=True, check=True).stdout
-    assert out.split() == ["--vpc-connector=finnie-vpc-connector", "--vpc-egress=private-ranges-only"]
+    assert out.split() == [
+        "--vpc-connector=projects/993895079602/locations/us-central1/connectors/finnie-vpc-connector",
+        "--vpc-egress=private-ranges-only",
+    ]

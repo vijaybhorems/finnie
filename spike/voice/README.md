@@ -110,6 +110,8 @@ FINNIE_EVAL_CALLS=1 FINNIE_EVAL_CALL_SCENARIOS=basic,interruption .venv-voice/bi
 .venv-voice/bin/python scripts/voice_turn_sweep.py --grid endpointing_min_delay=0.4,0.5,0.8 --repeat 2
 ```
 
+They run on the local dev server unless `.env` names a LiveKit Cloud project kept for testing: `SIM_LIVEKIT_URL`, `SIM_LIVEKIT_API_KEY` and `SIM_LIVEKIT_API_SECRET`. Both the worker and the caller then use it. Cloud has adaptive interruption, which the local server refuses (401), so `backchannel` is only meaningful there. The sims never use the app's own `LIVEKIT_*` keys, because a worker registered with a project is handed that project's real calls. Don't point `SIM_LIVEKIT_*` at the production project.
+
 The rate limit, daily minutes and voice-call records live in the user's store, which is per process without `DATABASE_URL`. To see them shared between the caller and the worker, give both the same `DATABASE_URL` (run `python -m src.persistence.migrate` on it first).
 
 To check failure handling, start the worker with one vendor's key broken (the caller keeps the real keys from `.env`), then run the scripted call:

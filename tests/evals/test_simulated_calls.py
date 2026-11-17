@@ -62,9 +62,10 @@ def real_keys(monkeypatch):
         pytest.skip("ANTHROPIC_API_KEY missing from .env")
     monkeypatch.setenv("ANTHROPIC_API_KEY", key)
     # The caller mints through the app's minter (spike/voice/local_token.py) in this process.
-    for name, value in (("FINNIE_VOICE_ENABLED", "1"), ("FINNIE_VOICE_ALLOWED_EMAILS", "tester@example.com"),
-                        ("LIVEKIT_URL", "ws://localhost:7880"), ("LIVEKIT_API_KEY", "devkey"),
-                        ("LIVEKIT_API_SECRET", "secret")):
+    from tests.evals.sim_caller import livekit_target
+
+    for name, value in {"FINNIE_VOICE_ENABLED": "1", "FINNIE_VOICE_ALLOWED_EMAILS": "tester@example.com",
+                        **livekit_target()}.items():
         monkeypatch.setenv(name, value)
     from src.core.config import get_settings
     get_settings.cache_clear()

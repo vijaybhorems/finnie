@@ -4,6 +4,10 @@ Needs the voice venv (livekit rtc), the local LiveKit server and macOS `say`:
     docker run -d --name finnie-livekit -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \\
         livekit/livekit-server:v1.13.10 --dev --bind 0.0.0.0 --node-ip 127.0.0.1
 
+or a LiveKit Cloud project kept for testing, named by SIM_LIVEKIT_URL,
+SIM_LIVEKIT_API_KEY and SIM_LIVEKIT_API_SECRET in .env (`livekit_target()`).
+Cloud has what the local server lacks, such as adaptive interruption.
+
 `Worker` starts `src.voice.worker start` itself, with voice on for the test
 email, an in-memory store (never the dev database), a local turn log, and any
 voice settings to try (FINNIE_VOICE_SETTINGS). Stop any other worker first:
@@ -45,6 +49,24 @@ OPENING_S = 150.0  # the first call waits for a process to load (~15-40 s)
 
 def _env_file() -> dict[str, str]:
     return {k: v for k, v in dotenv_values(ROOT / ".env").items() if v is not None}
+
+
+_LOCAL_LIVEKIT = {"LIVEKIT_URL": "ws://localhost:7880", "LIVEKIT_API_KEY": "devkey",
+                  "LIVEKIT_API_SECRET": "secret"}  # `livekit-server --dev`
+
+
+def livekit_target() -> dict[str, str]:
+    """LIVEKIT_* for the worker and the caller alike: the local dev server, or the
+    project named by SIM_LIVEKIT_* (environment, then .env). Never the app's own
+    LIVEKIT_* keys: a worker registered with a project takes its real calls."""
+    source = {**_env_file(), **os.environ}
+    sim = {name: source.get("SIM_" + name, "").strip() for name in _LOCAL_LIVEKIT}
+    if not any(sim.values()):
+        return dict(_LOCAL_LIVEKIT)
+    missing = ["SIM_" + name for name, value in sim.items() if not value]
+    if missing:
+        raise RuntimeError(f"{', '.join(missing)} not set: set all three SIM_LIVEKIT_* or none")
+    return sim
 
 
 # ── The caller's voice ──────────────────────────────────────────────────────
@@ -122,9 +144,7 @@ class Worker:
         self.log = self.dir / "worker.log"
         self.turn_log = self.dir / "turns.jsonl"
         env = {**os.environ, **_env_file()}  # the real keys: tests mock the process's own env
-        for key, dev in (("LIVEKIT_URL", "ws://localhost:7880"), ("LIVEKIT_API_KEY", "devkey"),
-                         ("LIVEKIT_API_SECRET", "secret")):  # `livekit-server --dev`, as local_token.py
-            env.setdefault(key, dev)
+        env.update(livekit_target())  # where the caller connects too, whatever .env says
         env.update({
             "FINNIE_VOICE_ENABLED": "1",
             "FINNIE_VOICE_ALLOWED_EMAILS": email,

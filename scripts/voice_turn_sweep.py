@@ -119,6 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("FINNIE_VOICE_ENABLED", "1")
     os.environ.setdefault("FINNIE_VOICE_ALLOWED_EMAILS", "tester@example.com")
     os.environ["DATABASE_URL"] = ""
+    from tests.evals.sim_caller import livekit_target
+
+    os.environ.update(livekit_target())  # the worker's server, not the app's LIVEKIT_* from .env
 
     from tests.evals.sim_calls import SCENARIOS, by_name
 

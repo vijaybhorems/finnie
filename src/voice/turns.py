@@ -152,6 +152,12 @@ class StallWatch:
       so an outage counts once when it starts, and again each `stall_s` it
       lasts without a transcript.
 
+    Speech that starts while Finnie is speaking is no quiet stall: adaptive
+    interruption drops a backchannel ("uh huh") without a transcript, and a
+    background voice is often too faint to transcribe. Counting them said "I'm
+    having trouble hearing you" over working calls, and two ended the call.
+    Outages still count whoever is speaking.
+
     Any transcript resets the count, so only stalls in a row end the call:
     `tick()` says PROMPT (say HEARING_TROUBLE) until the `limit`-th, then END
     (say HEARING_GIVE_UP and end the call).
@@ -164,19 +170,21 @@ class StallWatch:
         self._stall_s, self._limit, self._min_speech_s = stall_s, limit, min_speech_s
         self.in_a_row = 0
         self._speech_started: Optional[float] = None
+        self._overlapped = False  # began while Finnie was speaking
         self._heard = False
         self._waiting_since: Optional[float] = None  # quiet stall: speech ended, no words yet
         self._outage_due: Optional[float] = None     # outage: when it next counts
 
-    def speech_started(self, now: float) -> None:
+    def speech_started(self, now: float, agent_speaking: bool = False) -> None:
         self._speech_started, self._heard, self._waiting_since = now, False, None
+        self._overlapped = agent_speaking
 
     def speech_ended(self, now: float) -> None:
         if self._speech_started is None:
             return
         long_enough = now - self._speech_started >= self._min_speech_s
         self._speech_started = None
-        if long_enough and not self._heard:
+        if long_enough and not self._heard and not self._overlapped:
             self._waiting_since = now
 
     def transcript(self) -> None:

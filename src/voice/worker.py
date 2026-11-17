@@ -744,7 +744,7 @@ async def entrypoint(ctx: JobContext) -> None:
         now = time.monotonic()
         monitor.set_user_speaking(event.new_state == "speaking", now)
         if event.new_state == "speaking":
-            stalls.speech_started(now)
+            stalls.speech_started(now, agent_speaking=session.agent_state == "speaking")
             agent.on_user_speaking()
         elif getattr(event, "old_state", None) == "speaking":
             stalls.speech_ended(now)

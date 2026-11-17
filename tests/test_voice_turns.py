@@ -42,9 +42,9 @@ class TestPreamble:
         assert preamble(_verdict("market_analysis", ["AAPL"]), filler=False) == [SECURITIES_LINE]
 
     @pytest.mark.parametrize("agent", ["finance_qa", "tax_education"])
-    def test_qa_and_tax_turns_get_a_filler_too(self, agent):
-        """Their first sentence lands ~1.3 s after the verdict; the filler is heard first."""
-        assert preamble(_verdict(agent)) == [FILLERS[agent]]
+    def test_qa_and_tax_turns_start_with_the_answer(self, agent):
+        """Nothing to fetch, so no filler: testers heard "Let me explain." as padding."""
+        assert preamble(_verdict(agent)) == []
 
     def test_securities_line_never_depends_on_the_filler_switch(self):
         assert preamble(_verdict("portfolio"), filler=False) == [SECURITIES_LINE]
@@ -159,6 +159,30 @@ class TestStallWatch:
         watch.speech_started(0)
         watch.speech_ended(0.3)
         assert watch.tick(10) is None
+
+    def test_speech_over_finnie_is_no_stall(self):
+        """A backchannel adaptive interruption drops, or a faint background voice, gives
+        no transcript; two of them in one answer used to end the call."""
+        watch = StallWatch(stall_s=3, limit=2)
+        for start in (0, 10):
+            watch.speech_started(start, agent_speaking=True)
+            watch.speech_ended(start + 1)
+            assert watch.tick(start + 5) is None
+        assert watch.in_a_row == 0
+
+    def test_speech_after_finnie_stops_still_counts(self):
+        watch = StallWatch(stall_s=3, limit=2)
+        watch.speech_started(0, agent_speaking=True)
+        watch.speech_ended(1)
+        watch.speech_started(5)
+        watch.speech_ended(7)
+        assert watch.tick(10) == StallWatch.PROMPT
+
+    def test_an_outage_counts_even_over_finnie(self):
+        watch = StallWatch(stall_s=3, limit=2)
+        watch.speech_started(0, agent_speaking=True)
+        watch.failure(0.5)
+        assert watch.tick(0.5) == StallWatch.PROMPT
 
     def test_an_outage_counts_once_then_again_if_it_lasts(self):
         watch = StallWatch(stall_s=3, limit=2)

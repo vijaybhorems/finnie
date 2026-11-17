@@ -18,6 +18,7 @@ Without that line, the PR title is used, and the type is guessed from its first 
 - CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
 
 ### Changed
+- Voice answers to questions and tax topics start without a filler line, and talking over Finnie no longer triggers "I'm having trouble hearing you" ([#58](https://github.com/vijaybhorems/finnie/pull/58))
 - Voice worker reaches Memorystore through the app's VPC connector ([#57](https://github.com/vijaybhorems/finnie/pull/57))
 - Voice calls use LiveKit's adaptive interruption when it is reachable, so "uh huh" can be told from a cut-in ([#54](https://github.com/vijaybhorems/finnie/pull/54))
 - Voice answers to finance and tax questions start about 1.7 s sooner. ([#51](https://github.com/vijaybhorems/finnie/pull/51))

@@ -128,8 +128,10 @@ steps:
         docker push --all-tags ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}
 
   # After the app's deploy, so the app's migrations have run before the worker
-  # starts. Its keys, voice flag and allowlist are copied from the app service
-  # (deploy/worker_env.py), so the two can't drift apart.
+  # starts. Its keys, voice flag, allowlist and VPC route (to reach the private
+  # Memorystore REDIS_HOST) are copied from the app service (deploy/worker_env.py),
+  # so the two can't drift apart. Only private addresses go through the VPC: the
+  # speech vendors and LiveKit's media keep Cloud Run's own internet egress.
   #
   # A worker pool gets 10 s between SIGTERM and SIGKILL, so a deploy ends calls in
   # progress (the page says "The call dropped"). Fine while voice is for testers;
@@ -147,6 +149,9 @@ steps:
         PY="$$(command -v python3 || gcloud info --format='value(basic.python_location)')"
         ENV_VARS="$$("$$PY" deploy/worker_env.py env /workspace/app-service.json)"
         SECRETS="$$("$$PY" deploy/worker_env.py secrets /workspace/app-service.json)"
+        # One flag per line, none with spaces, so $$NETWORK is left unquoted below.
+        NETWORK="$$("$$PY" deploy/worker_env.py network /workspace/app-service.json)"
+        echo "worker VPC flags: $${NETWORK:-none (the app has no VPC route)}"
         gcloud run worker-pools deploy ${_VOICE_POOL} \
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}:$BUILD_ID \
           --region=${_REGION} \
@@ -156,4 +161,5 @@ steps:
           --service-account=${_RUNTIME_SA} \
           --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
           --update-env-vars="$$ENV_VARS" \
-          --update-secrets="$$SECRETS"
+          --update-secrets="$$SECRETS" \
+          $$NETWORK

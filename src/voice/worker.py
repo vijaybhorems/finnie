@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -414,11 +415,22 @@ def _last_user_turn(chat_ctx: llm.ChatContext) -> tuple[str, float | None]:
 
 
 def prewarm(proc: JobProcess) -> None:
-    """Load models before taking calls, as warmup.py does for the web app."""
+    """Load models before taking calls, as warmup.py does for the web app.
+
+    Runs in every new call process, beside a live call whenever it replaces an
+    idle process that a call just took; src/voice/preload.py keeps it short.
+    """
+    started, modules = time.perf_counter(), len(sys.modules)
+    preloaded = "src.voice.preload" in sys.modules  # forked from LiveKit's forkserver (Linux)
     proc.userdata["vad"] = silero.VAD.load()
     from src.web_app import warmup
 
     warmup.wait()
+    # cpu_s: all this process's CPU so far, including re-running this module after the fork.
+    logger.info(
+        "voice_process_ready", seconds=round(time.perf_counter() - started, 2),
+        cpu_s=round(time.process_time(), 2), modules_imported=len(sys.modules) - modules, preloaded=preloaded,
+    )
 
 
 # Prewarm loads the embedding model and the graph (~20-40 s cold); LiveKit's
@@ -427,6 +439,9 @@ def prewarm(proc: JobProcess) -> None:
 # Sizing (voice.idle_processes): see VoiceConfig and the worker pool's memory in cloudbuild.yaml.
 server = AgentServer(
     setup_fnc=prewarm,
+    # Imported once in the forkserver (Linux): a replacement process then starts
+    # without ~4 s of imports competing with the call that just took its place.
+    preload_modules=["src.voice.preload"],
     initialize_process_timeout=120,
     shutdown_process_timeout=get_settings().voice.memory_wait_seconds + 5,
     num_idle_processes=ServerEnvOption(dev_default=0, prod_default=get_settings().voice.idle_processes),

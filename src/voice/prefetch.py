@@ -19,6 +19,11 @@ FILLERS: dict[str, str] = {
     "news_synthesizer": "Let me look at the latest news.",
     "goal_planning": "Let me work through that.",
     "portfolio": "Let me take a look.",
+    # No data to fetch, but Sonnet's first sentence still lands ~1.3 s after
+    # the verdict (first token ~0.85 s, then the sentence). These cover it;
+    # the answer is ready by the time they finish playing.
+    "finance_qa": "Let me explain.",
+    "tax_education": "Here's how that works.",
 }
 
 

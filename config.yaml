@@ -135,6 +135,7 @@ voice:
   stt_model: "nova-3"
   tts_model: "eleven_flash_v2_5"
   classifier_model: "claude-haiku-5-5"   # the worker's process only
+  classifier_reason: false               # the worker's process only: no written reason, ~0.35 s sooner
   llm_thinking: "disabled"               # the worker's process only
   db_pool_max_size: 2         # per worker process
   idle_processes: 2           # calls the worker can take at once without loading first (~850 MB each)

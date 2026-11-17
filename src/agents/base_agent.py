@@ -51,6 +51,7 @@ def _text_block(text: str, cache_control: Optional[dict[str, str]] = None) -> di
 _VOICE_INSTRUCTION = """## This answer will be spoken aloud
 The user is talking to Finnie by voice and will hear this answer, not read it.
 - Answer in 2 to 4 short sentences, about 60 words at most. Put the single most useful point first.
+- Keep the first sentence to about ten words: the direct answer, with the explanation after it. The user hears nothing until that first sentence is finished.
 - Plain spoken English only: no markdown, headings, bullet points, tables, links or symbols that don't read aloud.
 - Say numbers the way a person would ("about seven percent"), and round them.
 - Use what you know about the user (their profile and remembered facts) to shape the answer, but don't recite it back unless they ask what you know about them. Others may be in the room. Where the context doesn't say something about them, such as their age or how far they are from retirement, don't guess it: say "if you have decades ahead, …".

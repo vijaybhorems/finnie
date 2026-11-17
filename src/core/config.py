@@ -67,6 +67,11 @@ class LLMConfig(BaseModel):
     # A smaller model answers this short structured call faster; check routing
     # accuracy before switching (spike/voice/compare_classifier.py).
     classifier_model: str | None = None
+    # The classifier also writes a one-sentence reason (shown with chat answers,
+    # logged with refusals). It comes after the decision, so it never changes
+    # it, but it is about a quarter of the call's output: ~0.35 s on Haiku 5.5.
+    # The voice worker turns it off (voice.classifier_reason).
+    classifier_reason: bool = True
     prompt_caching: PromptCachingConfig = PromptCachingConfig()
 
 
@@ -226,6 +231,7 @@ class VoiceConfig(BaseModel):
     tts_voice_id: str = ""  # empty: the ElevenLabs plugin's default voice
     # Latency settings the worker applies to its own process only (see llm.*).
     classifier_model: str = "claude-haiku-5-5"
+    classifier_reason: bool = False
     llm_thinking: Literal["adaptive", "disabled"] = "disabled"
     # The worker holds few concurrent turns per process; chat's pool size would
     # multiply Cloud SQL connections by the number of worker processes.

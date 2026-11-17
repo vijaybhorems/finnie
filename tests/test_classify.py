@@ -321,3 +321,51 @@ class TestAcknowledgements:
         state = _make_state("Stop.")
         state.is_on_topic, state.next_agent = True, AgentType.ACKNOWLEDGE
         assert route_after_classify(state) == "acknowledged"
+
+
+class TestReasonSetting:
+    """llm.classifier_reason: off on voice, where the written reason only costs time."""
+
+    def test_reason_asked_for_by_default(self):
+        from src.workflow.classify import classify_query
+
+        llm = _mock_llm(Verdict(on_topic=True, agent="finance_qa", reason="concept"))
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            verdict = classify_query("What is a bond?")
+        llm.with_structured_output.assert_called_once_with(Verdict)
+        assert verdict.reason == "concept"
+
+    def test_without_reason_the_decision_alone_is_asked_for(self):
+        from src.core.config import get_settings
+        from src.workflow.classify import Routing, classify_query
+
+        get_settings().llm.classifier_reason = False
+        llm = _mock_llm(Routing(on_topic=True, agent="tax_education", tickers=[]))
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            verdict = classify_query("What is a Roth IRA?")
+            result = classify_node(_make_state("What is a Roth IRA?"))  # the same verdict, reused
+        llm.with_structured_output.assert_called_once_with(Routing)
+        assert isinstance(verdict, Verdict) and verdict.reason == "" and verdict.agent == "tax_education"
+        assert result["next_agent"] == AgentType.TAX_EDUCATION
+
+    def test_a_verdict_without_reason_is_not_reused_with_one(self):
+        """The setting is part of the cache key: a process that wants reasons gets them."""
+        from src.core.config import get_settings
+        from src.workflow.classify import Routing, classify_query
+
+        settings = get_settings()
+        settings.llm.classifier_reason = False
+        with patch("src.workflow.classify.get_llm", return_value=_mock_llm(Routing(on_topic=True))):
+            classify_query("What is a bond?")
+        settings.llm.classifier_reason = True
+        llm = _mock_llm(Verdict(on_topic=True, reason="concept"))
+        with patch("src.workflow.classify.get_llm", return_value=llm):
+            assert classify_query("What is a bond?").reason == "concept"
+
+    def test_the_voice_process_turns_it_off(self, monkeypatch):
+        from src.core.config import get_settings
+        from src.voice.runtime import configure_process
+
+        monkeypatch.delenv("FINNIE_CLASSIFIER_MODEL", raising=False)
+        configure_process()
+        assert get_settings().llm.classifier_reason is False

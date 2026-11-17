@@ -99,3 +99,40 @@ def test_runs_as_cloud_build_calls_it(tmp_path):
     bad = subprocess.run([sys.executable, str(SCRIPT), "secrets", str(tmp_path / "missing.json")],
                          capture_output=True, text=True)
     assert bad.returncode != 0
+
+
+def _with_annotations(service: dict, **annotations: str) -> dict:
+    service = json.loads(json.dumps(service))
+    service["spec"]["template"]["metadata"] = {
+        "annotations": {f"run.googleapis.com/{k.replace('_', '-')}": v for k, v in annotations.items()}
+    }
+    return service
+
+
+def test_the_worker_uses_the_apps_vpc_connector_for_private_addresses_only():
+    """REDIS_HOST is a private Memorystore address; the app reaches it through a connector.
+    The worker takes the same route, but only for private ranges, even when the app sends
+    everything: call audio and the speech vendors keep Cloud Run's internet egress."""
+    app = _with_annotations(APP, vpc_access_connector="finnie-vpc-connector", vpc_access_egress="all-traffic")
+    assert worker_env.network(app) == ["--vpc-connector=finnie-vpc-connector", "--vpc-egress=private-ranges-only"]
+
+
+def test_the_worker_mirrors_direct_vpc_egress():
+    nics = '[{"network":"default","subnetwork":"default","tags":["redis-client"]}]'
+    app = _with_annotations(APP, network_interfaces=nics)
+    assert worker_env.network(app) == [
+        "--network=default", "--subnet=default", "--network-tags=redis-client", "--vpc-egress=private-ranges-only",
+    ]
+
+
+def test_an_app_without_a_vpc_route_gives_the_worker_none():
+    assert worker_env.network(APP) == []
+    assert worker_env.network(_with_annotations(APP, execution_environment="gen2")) == []
+
+
+def test_network_flags_print_one_per_line(tmp_path):
+    path = tmp_path / "app.json"
+    path.write_text(json.dumps(_with_annotations(APP, vpc_access_connector="finnie-vpc-connector")))
+    out = subprocess.run([sys.executable, str(SCRIPT), "network", str(path)],
+                         capture_output=True, text=True, check=True).stdout
+    assert out.split() == ["--vpc-connector=finnie-vpc-connector", "--vpc-egress=private-ranges-only"]

@@ -8,10 +8,19 @@ the deploy step copies them from the app service on every deploy:
     gcloud run services describe finnie-app --region=us-central1 --format=json > app.json
     python3 deploy/worker_env.py env app.json       # for --update-env-vars
     python3 deploy/worker_env.py secrets app.json   # for --update-secrets
+    python3 deploy/worker_env.py network app.json   # VPC flags, one per line
 
 Secrets are copied as references (secret name and version), never values. The
 app's sign-in secrets are not copied: the worker has no use for them. Speech
 keys exist only for the worker and are referenced by name.
+
+The worker also gets the app's route into the VPC (a Serverless VPC Access
+connector, or Direct VPC egress), since REDIS_HOST is a private Memorystore
+address. Without it every call process fails to reach Redis and falls back to a
+memory cache, so the speech-vendor breakers (src/voice/health.py) only ever see
+one call. Only private addresses use that route (private-ranges-only): LiveKit,
+Deepgram and ElevenLabs stay on Cloud Run's own internet egress, whatever the
+app's egress setting, so call audio never passes through the connector.
 
 Standard library only: it runs in Cloud Build's cloud-sdk image.
 """
@@ -71,12 +80,37 @@ def secrets(service: dict) -> str:
     return ",".join(pairs)
 
 
+def network(service: dict) -> list[str]:
+    """`gcloud run worker-pools deploy` flags that put the worker on the app's VPC.
+
+    Empty when the app has no VPC route (then it has no private Redis either)."""
+    _env_entries(service)  # refuses anything that isn't a service description
+    annotations = service["spec"]["template"].get("metadata", {}).get("annotations", {})
+    connector = annotations.get("run.googleapis.com/vpc-access-connector")
+    interfaces = json.loads(annotations.get("run.googleapis.com/network-interfaces") or "[]")
+    if connector:
+        flags = [f"--vpc-connector={connector}"]
+    elif interfaces:
+        nic = interfaces[0]
+        flags = [f"--{key}={nic[key]}" for key in ("network",) if nic.get(key)]
+        if nic.get("subnetwork"):
+            flags.append(f"--subnet={nic['subnetwork']}")
+        if nic.get("tags"):
+            flags.append("--network-tags=" + ",".join(nic["tags"]))
+    else:
+        return []
+    return flags + ["--vpc-egress=private-ranges-only"]
+
+
 def main(argv: list[str]) -> None:
-    if len(argv) != 3 or argv[1] not in ("env", "secrets"):
-        raise SystemExit("usage: worker_env.py env|secrets SERVICE_JSON")
+    if len(argv) != 3 or argv[1] not in ("env", "secrets", "network"):
+        raise SystemExit("usage: worker_env.py env|secrets|network SERVICE_JSON")
     with open(argv[2]) as f:
         service = json.load(f)
-    print(env_vars(service) if argv[1] == "env" else secrets(service))
+    if argv[1] == "network":
+        print("\n".join(network(service)))
+    else:
+        print(env_vars(service) if argv[1] == "env" else secrets(service))
 
 
 if __name__ == "__main__":

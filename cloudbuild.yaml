@@ -143,8 +143,10 @@ steps:
         set -eu
         if [ "${_VOICE}" != "1" ]; then echo "voice off (_VOICE=${_VOICE}): not deploying the worker"; exit 0; fi
         gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /workspace/app-service.json
-        ENV_VARS="$$(python3 deploy/worker_env.py env /workspace/app-service.json)"
-        SECRETS="$$(python3 deploy/worker_env.py secrets /workspace/app-service.json)"
+        # cloud-sdk:slim has no python3 on PATH; gcloud's bundled Python runs this stdlib script.
+        PY="$$(command -v python3 || gcloud info --format='value(basic.python_location)')"
+        ENV_VARS="$$("$$PY" deploy/worker_env.py env /workspace/app-service.json)"
+        SECRETS="$$("$$PY" deploy/worker_env.py secrets /workspace/app-service.json)"
         gcloud run worker-pools deploy ${_VOICE_POOL} \
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_VOICE_IMAGE_NAME}:$BUILD_ID \
           --region=${_REGION} \

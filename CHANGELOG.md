@@ -17,6 +17,9 @@ Without that line, the PR title is used, and the type is guessed from its first 
 - Voice calls can be deployed to Google Cloud as a Cloud Run worker pool, set up by the deploy wizard. ([#46](https://github.com/vijaybhorems/finnie/pull/46))
 - CHANGELOG.md with every past change, updated automatically when a PR merges ([#37](https://github.com/vijaybhorems/finnie/pull/37))
 
+### Changed
+- Voice answers to finance and tax questions start about 1.7 s sooner. ([#51](https://github.com/vijaybhorems/finnie/pull/51))
+
 ### Fixed
 - Follow-up questions ("What's the exact dollar amount?") are understood instead of refused, and "Stop." or "never mind" gets a short acknowledgement. ([#50](https://github.com/vijaybhorems/finnie/pull/50))
 - The deploy wizard no longer shows Talk before the voice worker is deployed, and saves its settings to deploy/.gcp.env. ([#47](https://github.com/vijaybhorems/finnie/pull/47))

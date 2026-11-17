@@ -29,8 +29,9 @@ MIRRORED_ENV = [
 # Secrets copied from the app's references. The first group must be there.
 REQUIRED_SECRETS = ["DATABASE_URL", "ANTHROPIC_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
 OPTIONAL_SECRETS = ["ALPHA_VANTAGE_API_KEY", "FRED_API_KEY", "NEWS_API_KEY", "PHOENIX_API_KEY"]
-# Only the worker uses these; deploy/setup_gcp.sh creates them under these names.
-WORKER_ONLY_SECRETS = ["DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY"]
+# Only the worker uses these: {env var the worker reads: secret deploy/setup_gcp.sh
+# stores}. LiveKit's ElevenLabs plugin reads ELEVEN_API_KEY and nothing else.
+WORKER_ONLY_SECRETS = {"DEEPGRAM_API_KEY": "DEEPGRAM_API_KEY", "ELEVEN_API_KEY": "ELEVENLABS_API_KEY"}
 
 
 def _env_entries(service: dict) -> list[dict]:
@@ -66,7 +67,7 @@ def secrets(service: dict) -> str:
             + ": run deploy/setup_gcp.sh (Voice stage) to add them, or deploy with _VOICE=0"
         )
     pairs = [f"{name}={refs[name]}" for name in REQUIRED_SECRETS + OPTIONAL_SECRETS if name in refs]
-    pairs += [f"{name}={name}:latest" for name in WORKER_ONLY_SECRETS]
+    pairs += [f"{env}={secret}:latest" for env, secret in WORKER_ONLY_SECRETS.items()]
     return ",".join(pairs)
 
 

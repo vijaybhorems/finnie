@@ -61,8 +61,16 @@ def test_secrets_are_copied_as_references_plus_the_speech_keys():
         "LIVEKIT_API_SECRET=LIVEKIT_API_SECRET:latest",
         "FRED_API_KEY=FRED_API_KEY:latest",
         "DEEPGRAM_API_KEY=DEEPGRAM_API_KEY:latest",
-        "ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest",
+        "ELEVEN_API_KEY=ELEVENLABS_API_KEY:latest",
     ]
+
+
+def test_speech_keys_reach_the_worker_under_the_names_it_reads_and_redacts():
+    """LiveKit's plugins read DEEPGRAM_API_KEY and ELEVEN_API_KEY; the worker's logs mask
+    exactly those (src/utils/redact.py). A key under another name leaves the voice silent."""
+    from src.utils.redact import _SECRET_ENV_VARS
+
+    assert set(worker_env.WORKER_ONLY_SECRETS) <= set(_SECRET_ENV_VARS)
 
 
 def test_an_app_without_voice_keeps_the_worker_off():

@@ -52,6 +52,15 @@ def test_every_alert_queries_a_defined_metric():
             assert (base != metric) == (base in distributions), f"{name}: suffix must match the value type"
 
 
+def test_every_metric_in_an_alert_names_the_worker_pool_resource():
+    """Monitoring refuses a PromQL policy on a log-based metric with no data yet unless the
+    resource type is named (the first wizard run failed on exactly this)."""
+    for name, policy in vm.policies(8, 10, 3).items():
+        query = policy["conditions"][0]["conditionPrometheusQueryLanguage"]["query"]
+        metrics = re.findall(re.escape(vm.PREFIX) + r"\w+(\{[^}]*\})?\[", query)
+        assert metrics and all(m == vm.RESOURCE for m in metrics), (name, query)
+
+
 def test_thresholds_and_channel_reach_the_policies():
     p = vm.policies(6.5, 25, 5, channel="projects/p/notificationChannels/9")
     queries = {n: x["conditions"][0]["conditionPrometheusQueryLanguage"]["query"] for n, x in p.items()}

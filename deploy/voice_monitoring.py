@@ -27,6 +27,10 @@ from pathlib import Path
 from typing import Any
 
 PREFIX = "logging_googleapis_com:user_"  # a log-based metric NAME in PromQL
+# The worker pool's logs. PromQL on a log-based metric must name the resource type:
+# before the first data point Monitoring can't tell which one, and refuses the
+# policy ("must specify a label matcher on the 'monitored_resource' label").
+RESOURCE = '{monitored_resource="cloud_run_worker_pool"}'
 
 # Seconds: fine steps around the spike's 4-8 s, since p95 is read from these.
 _FIRST_AUDIO_BOUNDS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 10, 12, 15, 20, 30]
@@ -97,7 +101,7 @@ def policies(ttfa_p95: float, daily_spend: float, failures: int, channel: str = 
     return {
         "voice_provider_failures": _policy(
             "voice_provider_failures", f"{failures}+ provider failures in 15 min",
-            f"sum(increase({PREFIX}voice_vendor_failures[15m])) >= {failures}",
+            f"sum(increase({PREFIX}voice_vendor_failures{RESOURCE}[15m])) >= {failures}",
             "Deepgram or ElevenLabs failed on several calls. Callers may hear \"I'm having trouble "
             "hearing you\" or the backup voice. Check the vendors' status pages and the worker's "
             "`voice_vendor_failed` lines (`vendor`, `what`).",
@@ -105,7 +109,7 @@ def policies(ttfa_p95: float, daily_spend: float, failures: int, channel: str = 
         ),
         "voice_slow_first_audio": _policy(
             "voice_slow_first_audio", f"p95 first audio above {ttfa_p95:g} s (1 h)",
-            f"histogram_quantile(0.95, sum by (le) (increase({PREFIX}voice_time_to_first_audio_bucket[1h]))) "
+            f"histogram_quantile(0.95, sum by (le) (increase({PREFIX}voice_time_to_first_audio_bucket{RESOURCE}[1h]))) "
             f"> {ttfa_p95:g}",
             "Finnie is slow to start speaking. By step and agent: export the `voice_turn` lines and run "
             "`python scripts/voice_latency.py` on them.",
@@ -113,7 +117,7 @@ def policies(ttfa_p95: float, daily_spend: float, failures: int, channel: str = 
         ),
         "voice_daily_spend": _policy(
             "voice_daily_spend", f"voice spend above ${daily_spend:g} in a day",
-            f"sum(increase({PREFIX}voice_call_cost_sum[1d])) > {daily_spend:g}",
+            f"sum(increase({PREFIX}voice_call_cost_sum{RESOURCE}[1d])) > {daily_spend:g}",
             "Estimated voice cost (list prices in config.yaml, voice.cost) passed the daily ceiling. "
             + report + " Lower voice.daily_minutes_per_user or narrow the allowlist to cut it.",
             channel,

@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
 load_dotenv()
@@ -313,6 +313,21 @@ class Settings(BaseSettings):
     phoenix_api_key: str = Field(default="", validation_alias="PHOENIX_API_KEY")
     phoenix_endpoint: str = Field(default="", validation_alias="PHOENIX_COLLECTOR_ENDPOINT")
     database_url: str = Field(default="", validation_alias="DATABASE_URL")
+    # SEC EDGAR refuses (403) requests whose User-Agent has no contact email:
+    # "Finnie admin@example.com". Unset, the news agent skips SEC filings.
+    sec_user_agent: str = Field(default="", validation_alias="SEC_USER_AGENT")
+
+    @field_validator(
+        "anthropic_api_key", "alpha_vantage_api_key", "fred_api_key", "news_api_key",
+        "phoenix_api_key", "database_url", "sec_user_agent",
+        mode="before",
+    )
+    @classmethod
+    def _strip_secret(cls, value: Any) -> Any:
+        # A secret saved with a trailing newline (echo, or pasted into a console)
+        # breaks it: requests refuses a header holding "\n", and a query
+        # parameter carries it as %0A. NewsAPI failed this way in production.
+        return value.strip() if isinstance(value, str) else value
 
     # Nested config (from YAML)
     app: AppConfig = AppConfig()

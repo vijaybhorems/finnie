@@ -36,8 +36,11 @@ _SECRET_ENV_VARS = (
 def redact(text: str, secrets: Iterable[str] = ()) -> str:
     """`text` with each secret and every `api_key=`-style query value masked."""
     for secret in secrets:
-        if secret and len(secret) >= _MIN_SECRET_LEN:
-            text = text.replace(secret, MASK)
+        # The stripped form too: an error message shows a secret's trailing
+        # newline escaped ("abc\\n"), which the raw value doesn't match.
+        for form in {secret, secret.strip()}:
+            if form and len(form) >= _MIN_SECRET_LEN:
+                text = text.replace(form, MASK)
     return _QUERY_SECRET.sub(lambda m: f"{m.group(1)}={MASK}", text)
 
 

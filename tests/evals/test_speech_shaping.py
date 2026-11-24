@@ -128,7 +128,9 @@ class TestSpokenDisclaimers:
         ("portfolio", [], True),
         ("news_synthesizer", ["AAPL"], True),
         ("news_synthesizer", [], False),
-        ("finance_qa", ["AAPL"], False),
+        # Q&A about a named company fetches its price and headlines.
+        ("finance_qa", ["AAPL"], True),
+        ("finance_qa", [], False),
         ("tax_education", [], False),
         ("goal_planning", [], False),
     ])
@@ -137,3 +139,11 @@ class TestSpokenDisclaimers:
 
         lines = preamble(SimpleNamespace(on_topic=True, agent=agent, tickers=tickers), filler=False)
         assert (SECURITIES_LINE in lines) is expected
+
+    @pytest.mark.parametrize("agent", ["news_synthesizer", "finance_qa"])
+    def test_securities_line_for_a_company_without_a_symbol(self, agent):
+        # A recent listing the classifier has no symbol for still names a security.
+        from types import SimpleNamespace
+
+        verdict = SimpleNamespace(on_topic=True, agent=agent, tickers=[], companies=["Anthropic"])
+        assert SECURITIES_LINE in preamble(verdict, filler=False)

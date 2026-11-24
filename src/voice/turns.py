@@ -38,9 +38,10 @@ STANDALONE_LINES = frozenset({SECURITIES_LINE, SLOW_NOTICE, SORRY, *FILLERS.valu
 
 # Routes whose answers are about specific securities. Portfolio answers are
 # about the user's own holdings; market answers name funds even for "how's the
-# market" (the SPY/QQQ snapshot); news only when the question names a company.
+# market" (the SPY/QQQ snapshot); news and Q&A only when the question names a
+# company, since both then fetch its price and headlines.
 _ALWAYS_SECURITIES = {"market_analysis", "portfolio"}
-_SECURITIES_WITH_TICKER = {"news_synthesizer"}
+_SECURITIES_WITH_TICKER = {"news_synthesizer", "finance_qa"}
 
 END = object()  # the graph finished
 
@@ -57,7 +58,8 @@ def preamble(verdict: Any, filler: bool = True) -> list[str]:
     lines = []
     if filler and agent in FILLERS:
         lines.append(FILLERS[agent])
-    if needs_securities_line(agent, list(getattr(verdict, "tickers", None) or [])):
+    named = [*(getattr(verdict, "tickers", None) or []), *(getattr(verdict, "companies", None) or [])]
+    if needs_securities_line(agent, named):
         lines.append(SECURITIES_LINE)
     return lines
 

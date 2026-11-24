@@ -299,28 +299,103 @@ class TestFredStaleFallback:
 
 
 class TestNewsClient:
-    @patch("src.data.news_client.feedparser")
+    _RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+<item><title>Test headline</title><link>https://example.com</link>
+<pubDate>Mon, 23 Nov 2026 10:00:00 GMT</pubDate><description>Test summary</description></item>
+</channel></rss>"""
+
+    def _cache(self, mock_cache):
+        inst = MagicMock()
+        inst.get.return_value = None
+        inst.get_stale.return_value = None
+        inst.cache_key.return_value = "key"
+        mock_cache.return_value = inst
+        return inst
+
+    @staticmethod
+    def _response(status=200, content=b""):
+        import requests as real_requests
+
+        resp = MagicMock(status_code=status, content=content)
+        if status >= 400:
+            resp.raise_for_status.side_effect = real_requests.HTTPError(f"{status} error")
+        return resp
+
+    @patch("src.data.news_client.requests.get")
+    def test_fetch_feed_reads_entries(self, mock_get):
+        from src.data.news_client import fetch_feed
+
+        mock_get.return_value = self._response(content=self._RSS)
+        entries = fetch_feed("https://example.com/rss")
+        assert entries[0].get("title") == "Test headline"
+        assert mock_get.call_args.kwargs["timeout"]
+
+    @pytest.mark.parametrize("status,content", [(404, b"not found"), (403, b"<html>blocked"), (200, b"<html><p>")])
+    @patch("src.data.news_client.requests.get")
+    def test_fetch_feed_raises_on_a_broken_feed(self, mock_get, status, content):
+        """feedparser alone turned a 404 or 403 into an empty feed, counted as a success."""
+        from src.data.news_client import fetch_feed
+
+        mock_get.return_value = self._response(status, content)
+        with pytest.raises(Exception):
+            fetch_feed("https://example.com/rss")
+
+    @patch("src.data.news_client.fetch_feed")
     @patch("src.data.news_client.get_cache")
-    def test_get_rss_headlines_fallback(self, mock_cache, mock_feedparser):
-        mock_cache_inst = MagicMock()
-        mock_cache_inst.get.return_value = None
-        mock_cache_inst.cache_key.return_value = "key"
-        mock_cache.return_value = mock_cache_inst
-
-        # Real feedparser entries are FeedParserDicts, which the client reads
-        # with .get(); a plain MagicMock would answer every .get() with a mock.
+    def test_rss_headlines_skip_a_dead_feed(self, mock_cache, mock_fetch):
         from feedparser import FeedParserDict
-        mock_feed = MagicMock()
-        mock_feed.entries = [
-            FeedParserDict(title="Test headline", link="https://example.com", published="2024-01-01", summary="Test summary"),
-        ]
-        mock_feedparser.parse.return_value = mock_feed
+        from src.data.news_client import FINANCIAL_RSS_FEEDS, NewsClient
 
+        dead = list(FINANCIAL_RSS_FEEDS.values())[0]
+        entry = FeedParserDict(title="Test headline", link="https://example.com",
+                               published="2024-01-01", summary="Test summary")
+
+        def fetch(url):
+            if url == dead:
+                raise ValueError("unreadable feed")
+            return [entry]
+
+        mock_fetch.side_effect = fetch
+        self._cache(mock_cache)
+        results = NewsClient()._get_rss_headlines()
+
+        assert len(results) == len(FINANCIAL_RSS_FEEDS) - 1
+        assert results[0] == {"title": "Test headline", "source": results[0]["source"],
+                              "url": "https://example.com", "published_at": "2024-01-01",
+                              "description": "Test summary"}
+
+    @patch("src.data.news_client.fetch_feed", side_effect=ValueError("down"))
+    @patch("src.data.news_client.get_cache")
+    def test_rss_headlines_all_dead_counts_a_failure(self, mock_cache, _fetch):
         from src.data.news_client import NewsClient
-        client = NewsClient()
-        results = client._get_rss_headlines()
+        from src.utils.circuit_breaker import get_breaker
 
-        assert len(results) > 0
-        assert results[0]["title"] == "Test headline"
-        assert results[0]["url"] == "https://example.com"
-        assert results[0]["description"] == "Test summary"
+        cache = self._cache(mock_cache)
+        assert NewsClient()._get_rss_headlines() == []
+        assert get_breaker("rss")._failure_count == 1
+        cache.set.assert_not_called()
+
+    @patch("src.data.news_client.fetch_feed")
+    @patch("src.data.news_client.get_cache")
+    def test_sec_filings_skipped_without_a_user_agent(self, mock_cache, mock_fetch):
+        from src.data.news_client import NewsClient
+
+        self._cache(mock_cache)
+        assert NewsClient().get_sec_filings() == []
+        mock_fetch.assert_not_called()
+
+    @patch("src.data.news_client.fetch_feed")
+    @patch("src.data.news_client.get_cache")
+    def test_sec_filings_send_the_contact_user_agent(self, mock_cache, mock_fetch, monkeypatch):
+        """SEC answers 403 to a User-Agent without a contact email."""
+        from feedparser import FeedParserDict
+        from src.core.config import get_settings
+        from src.data.news_client import NewsClient
+
+        monkeypatch.setenv("SEC_USER_AGENT", "Finnie admin@example.com")
+        get_settings.cache_clear()
+        self._cache(mock_cache)
+        mock_fetch.return_value = [FeedParserDict(title="8-K - Example Corp")]
+
+        assert NewsClient().get_sec_filings()[0]["title"] == "8-K - Example Corp"
+        assert mock_fetch.call_args.kwargs["headers"] == {"User-Agent": "Finnie admin@example.com"}

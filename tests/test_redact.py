@@ -124,3 +124,23 @@ def test_setup_logging_masks_secrets_everywhere(monkeypatch, capsys):
         structlog.reset_defaults()
     assert "oops" in out
     assert FRED_KEY not in out and "elevenkey0123456789" not in out
+
+
+def test_redact_masks_a_secret_saved_with_a_trailing_newline():
+    """requests shows the bad header value escaped, which the raw secret doesn't match."""
+    from src.utils.redact import redact
+
+    secret = "0123456789abcdef0123456789abcdef\n"
+    message = "Invalid leading whitespace in header value: '0123456789abcdef0123456789abcdef\\n'"
+    assert "0123456789abcdef" not in redact(message, [secret])
+
+
+def test_settings_strip_whitespace_from_api_keys(monkeypatch):
+    from src.core.config import get_settings
+
+    monkeypatch.setenv("NEWS_API_KEY", "0123456789abcdef\n")
+    monkeypatch.setenv("SEC_USER_AGENT", " Finnie admin@example.com \n")
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.news_api_key == "0123456789abcdef"
+    assert settings.sec_user_agent == "Finnie admin@example.com"

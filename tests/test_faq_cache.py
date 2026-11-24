@@ -182,6 +182,16 @@ class TestCacheNodes:
         faq_cache_write_node(state)
         assert self.cache.get("What is a P/E ratio?") is not None
 
+    def test_never_writes_an_answer_about_a_named_company(self):
+        """Even when the live lookup failed, the answer is about something that changes."""
+        state = _state("Should I care about the Anthropic IPO?", query_companies=["Anthropic"])
+        state.next_agent = AgentType.FINANCE_QA
+        state.needs_macro = False
+        state.final_response = "An IPO is..."
+
+        faq_cache_write_node(state)
+        assert self.cache.get("Should I care about the Anthropic IPO?") is None
+
     def test_never_writes_when_macro_data_was_used(self):
         state = _state("How do current rates affect bonds?")
         state.next_agent = AgentType.FINANCE_QA

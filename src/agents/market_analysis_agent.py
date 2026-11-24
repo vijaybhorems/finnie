@@ -11,6 +11,7 @@ from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
 from src.utils.parallel import gather
 from src.data.alpha_vantage_client import AlphaVantageClient
+from src.data.companies import format_companies, research_companies
 from src.data.yfinance_client import YFinanceClient
 
 
@@ -38,24 +39,32 @@ class MarketAnalysisAgent(BaseAgent):
         user_messages = [m for m in state.messages if hasattr(m, "type") and m.type == "human"]
         query = str(user_messages[-1].content) if user_messages else ""
 
-        # Tickers the classifier resolved (it maps names: "Apple" -> AAPL), then
-        # any symbols written in the text. Spoken questions name companies.
-        mentioned_tickers = list(dict.fromkeys([*state.query_tickers, *self._extract_tickers(query)]))
+        # Companies named in the question, looked up live (a recent listing has
+        # no symbol in the model's memory), then any symbols written in the text.
+        # The lookup runs beside the index and sector fetches.
+        extracted = self._extract_tickers(query)
+        first = gather({
+            **{f"index:{t}": (lambda t=t: self._yf.get_current_price(t)) for t in self.INDEX_TICKERS},
+            "sector": self._yf.get_sector_performance,
+            "companies": lambda: research_companies(
+                state.query_companies, state.query_tickers, self._yf,
+                with_prices=False, news_count=3,
+            ),
+        })
+        companies = first.get("companies") or []
+        mentioned_tickers = list(dict.fromkeys(
+            [c["symbol"] for c in companies if c["symbol"]] + state.query_tickers + extracted
+        ))
 
-        # Every quote, the sector sweep and each ticker's indicators are
-        # independent provider calls. Issued serially they dominated the turn;
-        # run them all concurrently instead.
+        # Each ticker's price and indicators are independent provider calls;
+        # run them concurrently.
         focus_tickers = mentioned_tickers[:3]  # limit to avoid rate limits
-        tasks: dict[str, Any] = {
-            f"index:{ticker}": (lambda t=ticker: self._yf.get_current_price(t))
-            for ticker in self.INDEX_TICKERS
-        }
-        tasks["sector"] = self._yf.get_sector_performance
+        tasks: dict[str, Any] = {}
         for ticker in focus_tickers:
             tasks[f"rsi:{ticker}"] = lambda t=ticker: self._av.get_rsi(t)
             tasks[f"price:{ticker}"] = lambda t=ticker: self._yf.get_current_price(t)
 
-        fetched = gather(tasks)
+        fetched = {**first, **gather(tasks)}
 
         index_data = {t: fetched.get(f"index:{t}") for t in self.INDEX_TICKERS}
         sector_data = fetched.get("sector") or {}
@@ -82,6 +91,9 @@ SECTOR PERFORMANCE (1-day):
 
 TECHNICAL ANALYSIS FOR REQUESTED TICKERS:
 {tech_json}
+
+COMPANIES NAMED IN THE QUESTION (live search):
+{format_companies(companies)}
 """
 
         response_text = self._invoke_llm(state, context)

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
 from src.utils.parallel import gather
+from src.data.companies import company_headlines, format_companies, research_companies
 from src.data.news_client import NewsClient
 from src.data.yfinance_client import YFinanceClient
 
@@ -37,10 +38,16 @@ class NewsSynthesizerAgent(BaseAgent):
 
         # Headlines, filings and per-ticker news are independent feeds — fetch
         # them concurrently instead of one round trip after another.
+        # Companies the question names get their own news from a live search,
+        # which is hours fresh; NewsAPI then searches their names rather than
+        # the whole sentence.
         portfolio_tickers = [h["ticker"] for h in state.user_profile.portfolio][:3]
+        named = state.query_companies
+        headline_query = " OR ".join(f'"{n}"' for n in named) if named else query
         tasks = {
-            "headlines": lambda: self._news.get_financial_headlines(query=query, page_size=8),
+            "headlines": lambda: self._news.get_financial_headlines(query=headline_query, page_size=8),
             "filings": lambda: self._news.get_sec_filings(max_items=5),
+            "companies": lambda: research_companies(state.query_companies, state.query_tickers, self._yf),
         }
         for ticker in portfolio_tickers:
             tasks[f"ticker:{ticker}"] = lambda t=ticker: self._news.get_ticker_news(t, page_size=3)
@@ -48,6 +55,7 @@ class NewsSynthesizerAgent(BaseAgent):
         fetched = gather(tasks)
 
         headlines = fetched.get("headlines") or []
+        companies = fetched.get("companies") or []
         headlines_text = self._format_headlines(headlines)
         sec_text = self._format_filings(fetched.get("filings") or [])
 
@@ -59,6 +67,9 @@ class NewsSynthesizerAgent(BaseAgent):
 
         context = f"""
 {self._get_user_context_str(state)}
+
+COMPANIES NAMED IN THE QUESTION (live search: price and latest news):
+{format_companies(companies)}
 
 LATEST FINANCIAL HEADLINES:
 {headlines_text}
@@ -74,8 +85,12 @@ PORTFOLIO-SPECIFIC NEWS:
         response_text = self._add_disclaimer(response_text)
 
         updated_financial_data = state.financial_data.model_copy()
-        updated_financial_data.news_headlines = [h["title"] for h in headlines]
-        updated_financial_data.sources = list({h["source"] for h in headlines if h.get("source")})
+        updated_financial_data.news_headlines = company_headlines(companies) + [h["title"] for h in headlines]
+        updated_financial_data.sources = list(
+            {h["source"] for h in headlines if h.get("source")}
+            | {n["source"] for c in companies for n in c["news"] if n.get("source")}
+        )
+        updated_financial_data.tickers = [c["symbol"] for c in companies if c["symbol"]]
 
         return {
             "messages": [AIMessage(content=response_text, name=self.name)],

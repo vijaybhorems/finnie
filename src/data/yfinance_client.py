@@ -1,7 +1,9 @@
 """yFinance client — historical prices, fundamentals, dividends, beta."""
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pandas as pd
@@ -14,6 +16,12 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _BREAKER_NAME = "yfinance"
+_SEARCH_BREAKER = "yahoo_search"
+
+# Search results worth naming: listed securities, not futures or currencies.
+_SEARCH_TYPES = {"EQUITY", "ETF", "MUTUALFUND", "INDEX"}
+# US-style symbols only (AAPL, BRK-B); "BRKB.VI" or "SAAPL=F" are other markets.
+_US_SYMBOL = re.compile(r"^[A-Z]{1,5}(-[A-Z])?$")
 
 # SPDR sector ETFs — used to derive sector performance since Alpha Vantage's
 # free SECTOR endpoint was deprecated (it now returns an empty payload).
@@ -139,6 +147,60 @@ class YFinanceClient:
         self._cache.set(key, result, ttl=1800)  # 30-min cache
         return result
 
+    def search(self, query: str, news_count: int = 5) -> dict[str, Any]:
+        """Yahoo Finance search for a company name or symbol.
+
+        Returns {"quotes": [...], "news": [...]}: matching US-listed securities,
+        best match first, and recent articles about them. This is how a company
+        that listed after the model's training resolves to its symbol.
+        """
+        query = " ".join(query.split())[:80]
+        empty: dict[str, Any] = {"quotes": [], "news": []}
+        if not query:
+            return empty
+        key = self._cache.cache_key("yf", "search", query.lower(), str(news_count))
+        cached = self._cache.get(key)
+        if cached:
+            return cached
+
+        breaker = get_breaker(_SEARCH_BREAKER)
+        if not breaker.allow():
+            return self._stale_or(key, empty)
+
+        try:
+            found = yf.Search(
+                query, max_results=6, news_count=news_count,
+                lists_count=0, recommended=0, timeout=10,
+            )
+            quotes = [
+                {
+                    "symbol": q["symbol"],
+                    "name": q.get("longname") or q.get("shortname") or "",
+                    "exchange": q.get("exchDisp") or q.get("exchange") or "",
+                    "type": q.get("quoteType", ""),
+                }
+                for q in (found.quotes or [])
+                if q.get("quoteType") in _SEARCH_TYPES and _US_SYMBOL.match(str(q.get("symbol", "")))
+            ]
+            news = [
+                {
+                    "title": n.get("title", ""),
+                    "source": n.get("publisher", ""),
+                    "url": n.get("link", ""),
+                    "published_at": _iso(n.get("providerPublishTime")),
+                }
+                for n in (found.news or [])
+                if n.get("title")
+            ]
+            result = {"quotes": quotes, "news": news}
+            breaker.record_success()
+            self._cache.set(key, result, ttl=900)  # 15 min: the news part goes stale
+            return result
+        except Exception as exc:
+            breaker.record_failure()
+            logger.error("yahoo_search_error", query=query, error=str(exc))
+            return self._stale_or(key, empty)
+
     def get_historical_prices(
         self,
         ticker: str,
@@ -259,3 +321,11 @@ class YFinanceClient:
             "total_gain_loss": round(total_gain_loss, 2),
             "total_gain_loss_pct": round(total_gain_loss / total_cost * 100, 2) if total_cost > 0 else 0.0,
         }
+
+
+def _iso(epoch: Any) -> str:
+    """A Unix timestamp as an ISO 8601 UTC string; "" when missing."""
+    try:
+        return datetime.fromtimestamp(int(epoch), tz=timezone.utc).isoformat(timespec="minutes")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""

@@ -195,6 +195,16 @@ class TestTickers:
 
         assert result["query_tickers"] == ["AAPL", "BRK-B"]
 
+    def test_node_returns_named_companies(self):
+        """A recent listing has no symbol the model knows; its name still goes through."""
+        verdict = Verdict(on_topic=True, agent="news_synthesizer", needs_macro=False,
+                          reason="ipo", companies=["  Anthropic ", "anthropic", "Apple"])
+        with patch("src.workflow.classify.get_llm", return_value=_mock_llm(verdict)):
+            result = classify_node(_make_state("What's the news on the Anthropic IPO?"))
+
+        assert result["query_companies"] == ["Anthropic", "Apple"]
+        assert result["query_tickers"] == []
+
     def test_tickers_default_to_empty(self):
         verdict = Verdict(on_topic=True, agent="finance_qa", needs_macro=False, reason="concept")
         with patch("src.workflow.classify.get_llm", return_value=_mock_llm(verdict)):

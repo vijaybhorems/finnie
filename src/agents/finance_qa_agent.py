@@ -7,7 +7,9 @@ from langchain_core.messages import AIMessage
 
 from src.agents.base_agent import BaseAgent
 from src.core.state import FinnieState
+from src.data.companies import company_headlines, format_companies, research_companies
 from src.data.fred_client import FredClient
+from src.data.yfinance_client import YFinanceClient
 from src.rag.retriever import get_retriever
 from src.utils.parallel import gather
 
@@ -27,6 +29,7 @@ class FinanceQAAgent(BaseAgent):
         super().__init__()
         self._retriever = get_retriever()
         self._fred = FredClient()
+        self._yf = YFinanceClient()
 
     def run(self, state: FinnieState) -> dict[str, Any]:
         self._logger.info("finance_qa_agent_running")
@@ -43,7 +46,16 @@ class FinanceQAAgent(BaseAgent):
         tasks = {"rag": lambda: self._retriever.get_context(query, top_k=4)}
         if want_macro:
             tasks["macro"] = self._fred.get_macro_snapshot
+        # A question naming a company ("Should I care about the Anthropic IPO?")
+        # gets its live price and headlines, so the answer isn't limited to
+        # what the model remembers.
+        named = state.query_companies or state.query_tickers
+        if named:
+            tasks["companies"] = lambda: research_companies(
+                state.query_companies, state.query_tickers, self._yf, news_count=3,
+            )
         fetched = gather(tasks)
+        companies = fetched.get("companies") or []
 
         rag_context = fetched.get("rag") or ""
         macro_str = (
@@ -61,15 +73,29 @@ KNOWLEDGE BASE CONTEXT (use this to ground your answer):
 CURRENT MACROECONOMIC DATA (reference if relevant):
 {macro_str}
 """
+        if named:
+            context += f"""
+COMPANIES NAMED IN THE QUESTION (live search: price and latest news):
+{format_companies(companies) if companies else "Live company data could not be retrieved right now."}
+"""
 
         response_text = self._invoke_llm(state, context)
         response_text = self._add_disclaimer(response_text)
 
-        return {
+        update: dict[str, Any] = {
             "messages": [AIMessage(content=response_text, name=self.name)],
             "final_response": response_text,
             "rag_context": rag_context.split("\n\n---\n\n") if rag_context else [],
         }
+        if companies:
+            # Live data dates the answer: recording it keeps the FAQ cache from
+            # storing it (faq_cache._used_live_data).
+            data = state.financial_data.model_copy()
+            data.tickers = [c["symbol"] for c in companies if c["symbol"]]
+            data.price_data = {c["symbol"]: c["price"] for c in companies if c["symbol"] and c["price"]}
+            data.news_headlines = company_headlines(companies)
+            update["financial_data"] = data
+        return update
 
     def _format_macro(self, macro: dict) -> str:
         lines = []

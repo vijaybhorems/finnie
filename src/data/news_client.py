@@ -1,4 +1,4 @@
-"""News client — NewsAPI + SEC EDGAR RSS feed."""
+"""News client — NewsAPI, financial RSS feeds and SEC EDGAR filings."""
 from __future__ import annotations
 
 from typing import Any
@@ -10,6 +10,7 @@ from src.core.config import get_settings
 from src.utils.cache import get_cache
 from src.utils.circuit_breaker import get_breaker
 from src.utils.logger import get_logger
+from src.utils.parallel import gather
 from src.utils.redact import redact
 
 logger = get_logger(__name__)
@@ -20,11 +21,35 @@ _SEC_BREAKER = "sec_edgar"
 
 SEC_EDGAR_RSS = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=20&output=atom"
 
+# Checked 2026-11-23. Reuters' feeds.reuters.com no longer resolves and Yahoo's
+# rssindex returns 404: both were here, and silently returned nothing.
 FINANCIAL_RSS_FEEDS = {
-    "Reuters Markets": "https://feeds.reuters.com/reuters/businessNews",
-    "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
+    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+    "CNBC Finance": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+    "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
     "Seeking Alpha": "https://seekingalpha.com/market_currents.xml",
 }
+_FEED_TIMEOUT_SECONDS = 8
+_FEED_USER_AGENT = "Mozilla/5.0 (compatible; Finnie/1.0; finance education)"
+
+
+def fetch_feed(url: str, headers: dict[str, str] | None = None) -> list[Any]:
+    """A feed's entries; raises when the feed can't be fetched or read.
+
+    `feedparser.parse(url)` never raises: a dead host, a 404 or a 403 all come
+    back as an empty feed, so a broken source looked like a quiet one and its
+    circuit breaker counted a success. It also has no timeout.
+    """
+    resp = requests.get(
+        url,
+        headers=headers or {"User-Agent": _FEED_USER_AGENT},
+        timeout=_FEED_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    feed = feedparser.parse(resp.content)
+    if not feed.entries and feed.bozo:
+        raise ValueError(f"unreadable feed: {feed.get('bozo_exception')}")
+    return list(feed.entries)
 
 
 class NewsClient:
@@ -90,7 +115,7 @@ class NewsClient:
             return self._get_rss_headlines()
 
     def _get_rss_headlines(self, max_per_feed: int = 5) -> list[dict[str, Any]]:
-        """Fallback: parse RSS feeds."""
+        """Fallback: the latest items from general financial RSS feeds."""
         key = self._cache.cache_key("news", "rss")
         cached = self._cache.get(key)
         if cached:
@@ -104,28 +129,34 @@ class NewsClient:
                 return stale
             return []
 
+        fetched = gather(
+            {source: (lambda u=url: fetch_feed(u)) for source, url in FINANCIAL_RSS_FEEDS.items()},
+            timeout=_FEED_TIMEOUT_SECONDS + 2,
+        )
         results: list[dict[str, Any]] = []
-        any_success = False
-        for source, url in FINANCIAL_RSS_FEEDS.items():
-            try:
-                feed = feedparser.parse(url)
-                for entry in feed.entries[:max_per_feed]:
-                    results.append({
-                        "title": entry.get("title", ""),
-                        "source": source,
-                        "url": entry.get("link", ""),
-                        "published_at": entry.get("published", ""),
-                        "description": entry.get("summary", "")[:300],
-                    })
-                any_success = True
-            except Exception as exc:
-                logger.warning("rss_feed_error", source=source, error=str(exc))
+        for source in FINANCIAL_RSS_FEEDS:
+            entries = fetched.get(source)
+            if entries is None:
+                logger.warning("rss_feed_error", source=source)
+                continue
+            for entry in entries[:max_per_feed]:
+                results.append({
+                    "title": entry.get("title", ""),
+                    "source": source,
+                    "url": entry.get("link", ""),
+                    "published_at": entry.get("published", ""),
+                    "description": entry.get("summary", "")[:300],
+                })
 
-        if any_success:
-            breaker.record_success()
-        else:
+        if not results:
             breaker.record_failure()
+            stale = self._cache.get_stale(key)
+            if stale is not None:
+                logger.warning("served_stale_cache", provider=_RSS_BREAKER, key=key)
+                return stale
+            return []
 
+        breaker.record_success()
         self._cache.set(key, results, ttl=1800)
         return results
 
@@ -137,7 +168,16 @@ class NewsClient:
         )
 
     def get_sec_filings(self, max_items: int = 10) -> list[dict[str, Any]]:
-        """Parse latest 8-K filings from SEC EDGAR RSS."""
+        """Parse latest 8-K filings from SEC EDGAR RSS.
+
+        SEC answers 403 to a User-Agent without a contact email, so this needs
+        SEC_USER_AGENT ("Finnie admin@example.com"); without it there are no filings.
+        """
+        user_agent = self._settings.sec_user_agent
+        if not user_agent:
+            logger.info("sec_edgar_skipped", reason="SEC_USER_AGENT not set")
+            return []
+
         key = self._cache.cache_key("news", "sec_edgar")
         cached = self._cache.get(key)
         if cached:
@@ -152,7 +192,7 @@ class NewsClient:
             return []
 
         try:
-            feed = feedparser.parse(SEC_EDGAR_RSS)
+            entries = fetch_feed(SEC_EDGAR_RSS, headers={"User-Agent": user_agent})
             results = [
                 {
                     "title": entry.get("title", ""),
@@ -160,7 +200,7 @@ class NewsClient:
                     "published": entry.get("published", ""),
                     "summary": entry.get("summary", "")[:300],
                 }
-                for entry in feed.entries[:max_items]
+                for entry in entries[:max_items]
             ]
             breaker.record_success()
             self._cache.set(key, results, ttl=3600)

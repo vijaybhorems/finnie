@@ -86,6 +86,15 @@ class Routing(BaseModel):
             "empty when no specific security is named."
         ),
     )
+    companies: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every company or fund the user names, as they name it: 'Anthropic', "
+            "'Apple', 'the S&P 500'. Include ones you have no symbol for, such as "
+            "a company that listed recently; a live search resolves them. Empty "
+            "when none is named."
+        ),
+    )
     follow_up: bool = Field(
         default=False,
         description=(
@@ -127,7 +136,8 @@ Examples:
 - "What is a P/E ratio?" -> on_topic, finance_qa, needs_macro=false
 - "How do current interest rates affect bond prices?" -> on_topic, finance_qa, needs_macro=true
 - "Analyze my portfolio: AAPL 10 shares @ $150" -> on_topic, portfolio, needs_macro=false
-- "What is Apple stock doing today?" -> on_topic, market_analysis, needs_macro=false, tickers=[AAPL]
+- "What is Apple stock doing today?" -> on_topic, market_analysis, needs_macro=false, tickers=[AAPL], companies=[Apple]
+- "What's the news on that company that just IPO'd, Acme Robotics?" -> on_topic, news_synthesizer, needs_macro=false, companies=[Acme Robotics]
 - "Why did stocks drop this morning?" -> on_topic, news_synthesizer, needs_macro=false
 - "How much do I need to retire at 55?" -> on_topic, goal_planning, needs_macro=true
 - "How does a Roth IRA work?" -> on_topic, tax_education, needs_macro=false
@@ -307,6 +317,19 @@ def _clean_tickers(raw: list[str]) -> list[str]:
     return out[:_MAX_TICKERS]
 
 
+_MAX_COMPANY_CHARS = 60
+
+
+def _clean_companies(raw: list[str]) -> list[str]:
+    """Names as the user said them, trimmed and de-duplicated."""
+    out: list[str] = []
+    for name in raw or []:
+        name = " ".join(str(name).split())[:_MAX_COMPANY_CHARS]
+        if name and name.lower() not in {o.lower() for o in out}:
+            out.append(name)
+    return out[:_MAX_TICKERS]
+
+
 def _default_verdict(reason: str) -> dict[str, Any]:
     """Allow the turn through to finance_qa — used for empty or unclassifiable input."""
     return {
@@ -353,6 +376,7 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
             agent=next_agent.value,
             needs_macro=verdict.needs_macro,
             tickers=_clean_tickers(verdict.tickers),
+            companies=len(verdict.companies),
             follow_up=verdict.follow_up,
             with_context=bool(context),
             reason=verdict.reason,
@@ -363,6 +387,7 @@ def classify_node(state: FinnieState) -> dict[str, Any]:
             "current_agent": AgentType.ROUTER,
             "needs_macro": verdict.needs_macro,
             "query_tickers": _clean_tickers(verdict.tickers),
+            "query_companies": _clean_companies(verdict.companies),
             # Only meaningful with context: without it there is nothing to follow.
             "follow_up": bool(context) and verdict.follow_up,
             "router_reasoning": verdict.reason,

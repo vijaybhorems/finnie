@@ -98,6 +98,10 @@ def faq_cache_write_node(state: FinnieState) -> dict[str, Any]:
         return {}
     if _used_live_data(state):
         return {}
+    if state.query_companies or state.query_tickers:
+        # About a named company: agents fetch its live price and news, and even
+        # when that fetch fails the answer is about something that changes.
+        return {}
     if state.channel != "chat":
         # A short spoken answer must never be served to a chat user.
         return {}

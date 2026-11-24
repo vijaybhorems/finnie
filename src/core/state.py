@@ -69,6 +69,11 @@ class FinnieState(BaseModel):
     # back to finding symbols in the text.
     query_tickers: list[str] = Field(default_factory=list)
 
+    # Companies and funds the user named, as they named them ("Anthropic").
+    # Agents look them up live (src/data/companies.py), so a company the model
+    # has no symbol for, such as a recent listing, still resolves.
+    query_companies: list[str] = Field(default_factory=list)
+
     # True when the classifier needed the previous turn to understand this
     # query ("What's the exact dollar amount?"). Such an answer is about this
     # conversation, so the shared FAQ cache never stores it.
